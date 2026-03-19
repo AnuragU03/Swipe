@@ -395,7 +395,7 @@ export default function CreateSession() {
                     }
                   }}
                 >
-                  <option value="other">Other (New Client)</option>
+                  <option value="other">Other</option>
                   {clientCatalog.map((client) => (
                     <option key={client.id} value={client.id}>
                       {client.name}
@@ -427,7 +427,7 @@ export default function CreateSession() {
                     }
                   }}
                 >
-                  <option value="other">Other (New Project)</option>
+                  <option value="other">Other</option>
                   {projectOptions.map((project) => (
                     <option key={project.id} value={project.id}>
                       {project.name}

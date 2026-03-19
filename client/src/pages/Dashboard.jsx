@@ -201,6 +201,13 @@ export default function Dashboard() {
                             .filter((image, idx, list) => image?.id && list.findIndex((candidate) => candidate.id === image.id) === idx)
                             .slice(0, 16);
 
+                          const projectPostCount = project.sessions.reduce(
+                            (sum, item) => sum + (Number(item.postCount) || 0),
+                            0
+                          );
+                          const hasAnyUploads = project.sessions.some((item) => (Number(item.imageCount) || 0) > 0);
+                          const resolvedPostCount = projectPostCount > 0 ? projectPostCount : hasAnyUploads ? 1 : 0;
+
                           const reviewerMap = new Map();
                           project.sessions.forEach((item) => {
                             (item.reviewerProgress || []).forEach((reviewer) => {
@@ -239,12 +246,16 @@ export default function Dashboard() {
                               <div className="dashboard-thumb-scroll">
                                 {projectImages.length > 0 ? (
                                   projectImages.map((image) => (
-                                    <img
-                                      key={image.id}
-                                      src={image.url}
-                                      alt={image.fileName || 'Creative asset'}
-                                      className="dashboard-thumb"
-                                    />
+                                    <div key={image.id} className="dashboard-thumb-wrap">
+                                      <img
+                                        src={image.url}
+                                        alt={image.fileName || 'Creative asset'}
+                                        className="dashboard-thumb"
+                                      />
+                                      {Number(image.rowOrder) > 0 && (
+                                        <span className="dashboard-post-badge">P{image.rowOrder}</span>
+                                      )}
+                                    </div>
                                   ))
                                 ) : (
                                   <div className="dashboard-thumb-empty">No uploaded images</div>
@@ -257,7 +268,7 @@ export default function Dashboard() {
                               </div>
 
                               <div style={{ fontSize: 12, color: 'var(--sub)', marginTop: 4, marginBottom: 8 }}>
-                                {project.sessions.length} session{project.sessions.length !== 1 ? 's' : ''} · {projectImages.length > 0 ? projectImages.length : project.sessions.reduce((sum, item) => sum + (Number(item.imageCount) || 0), 0)} image(s)
+                                {project.sessions.length} session{project.sessions.length !== 1 ? 's' : ''} · {resolvedPostCount} post{resolvedPostCount !== 1 ? 's' : ''} · {projectImages.length > 0 ? projectImages.length : project.sessions.reduce((sum, item) => sum + (Number(item.imageCount) || 0), 0)} image(s)
                               </div>
 
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

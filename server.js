@@ -525,9 +525,14 @@ app.get('/api/sessions', async (req, res) => {
           reviewerPassword: undefined,
           _submissions: submissions,
           submissionCount: submissions.length,
+          postCount: new Set(
+            images.map((img) => `${img.rowId || ''}-${Number(img.rowOrder) || 0}`).filter((key) => key !== '-0')
+          ).size,
           previewImages: images.slice(0, 8).map((img) => ({
             id: img.id,
             fileName: img.fileName,
+            rowId: img.rowId || null,
+            rowOrder: Number(img.rowOrder) || null,
             url: storage.generateSignedUrl(img.blobName),
           })),
           reviewLink: `/r/${s.id}`,

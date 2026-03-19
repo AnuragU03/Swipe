@@ -906,7 +906,7 @@ h1, h2, h3, h4 {
 
 .template-row-grid {
   display: grid;
-  grid-template-columns: 36px 1fr 2fr;
+  grid-template-columns: 36px minmax(120px, 1fr) minmax(0, 2fr);
   gap: 10px;
   align-items: center;
 }
@@ -957,8 +957,8 @@ h1, h2, h3, h4 {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 280px;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 .template-preview-item {
@@ -983,8 +983,52 @@ h1, h2, h3, h4 {
 
 .template-row-preview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
+}
+
+.dashboard-thumb-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.dashboard-post-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(232, 255, 71, 0.35);
+}
+
+.reviewer-post-meta-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reviewer-post-pill {
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  border: 1px solid rgba(232, 255, 71, 0.35);
+  background: rgba(232, 255, 71, 0.08);
+}
+
+.reviewer-post-pill-muted {
+  color: var(--sub);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .template-preview-modal-overlay {
@@ -1811,4 +1855,23 @@ h1, h2, h3, h4 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .template-row-grid {
+    grid-template-columns: 36px 1fr;
+  }
+
+  .template-text-box {
+    grid-column: 1 / -1;
+    min-height: 76px;
+  }
+
+  .template-upload-box {
+    min-height: 76px;
+  }
+
+  .template-row-preview-grid {
+    grid-template-columns: 1fr;
+  }
 }

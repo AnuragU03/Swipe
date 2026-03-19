@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import SwipeCard from '../components/SwipeCard';
@@ -18,12 +18,32 @@ export default function ReviewerSwipe() {
   useEffect(() => {
     api
       .getSessionImages(sessionId, true)
-      .then((data) => setImages(data.images || []))
+      .then((data) => {
+        const sorted = [...(data.images || [])].sort((a, b) => {
+          const rowA = Number(a.rowOrder) || Number.MAX_SAFE_INTEGER;
+          const rowB = Number(b.rowOrder) || Number.MAX_SAFE_INTEGER;
+          if (rowA !== rowB) return rowA - rowB;
+          const orderA = Number(a.order) || 0;
+          const orderB = Number(b.order) || 0;
+          return orderA - orderB;
+        });
+        setImages(sorted);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [sessionId]);
 
   const currentImage = images[currentIndex];
+  const postOrderList = useMemo(() => {
+    const set = new Set();
+    images.forEach((image) => {
+      const postOrder = Number(image.rowOrder) || 1;
+      set.add(postOrder);
+    });
+    return Array.from(set).sort((a, b) => a - b);
+  }, [images]);
+  const currentPostOrder = Number(currentImage?.rowOrder) || 1;
+  const currentPostIndex = Math.max(0, postOrderList.findIndex((post) => post === currentPostOrder));
   const isComplete = currentIndex >= images.length && images.length > 0;
   const progress = images.length > 0 ? (currentIndex / images.length) * 100 : 0;
 
@@ -274,6 +294,16 @@ export default function ReviewerSwipe() {
             style={{ width: `${progress}%`, background: 'var(--accent)', color: 'var(--accent)' }}
           />
         </div>
+        {currentImage && (
+          <div className="reviewer-post-meta-row">
+            <span className="reviewer-post-pill">
+              Post {currentPostIndex + 1} / {postOrderList.length || 1}
+            </span>
+            <span className="reviewer-post-pill reviewer-post-pill-muted">
+              {currentImage.templateChannel || 'Template'}
+            </span>
+          </div>
+        )}
       </div>
 
       <div style={{ flex: 1, position: 'relative', padding: '8px 20px 0', overflow: 'hidden' }}>
