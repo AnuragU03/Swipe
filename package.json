@@ -1,0 +1,29 @@
+{
+  "name": "creativeswipe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CreativeSwipe — Collaborative Creative Review Platform",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:client\"",
+    "dev:client": "cd client && npm run dev",
+    "dev:api": "cd api && npm start",
+    "build": "cd client && npm run build",
+    "start": "node server.js",
+    "install:all": "npm install && cd client && npm install && cd ../api && npm install",
+    "docker:build": "docker build -t creativeswipe .",
+    "docker:run": "docker run -p 8080:8080 --env-file .env creativeswipe"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "@azure/cosmos": "^4.0.0",
+    "@azure/storage-blob": "^12.17.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
