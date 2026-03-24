@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 
 const AuthContext = createContext(null);
+const RECEIVER_LOGOUT_FLAG = 'receiverLogoutRequested';
 
 export function AuthProvider({ children }) {
   const [creator, setCreator] = useState(null);
@@ -12,6 +13,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let mounted = true;
+
     const bootstrap = async () => {
       setLoading(true);
       try {
@@ -22,9 +24,9 @@ export function AuthProvider({ children }) {
             if (mounted) setCreator(data);
           } catch {
             if (mounted) {
+              api.clearCreatorSession();
               setCreator(null);
               setToken(null);
-              api.setCreatorToken(null);
             }
           }
         } else if (mounted) {
@@ -38,9 +40,9 @@ export function AuthProvider({ children }) {
             if (mounted) setReviewer(data);
           } catch {
             if (mounted) {
+              api.clearReviewerSession();
               setReviewer(null);
               setReviewerAccountToken(null);
-              api.setReviewerAccountToken(null);
             }
           }
         } else if (mounted) {
@@ -73,6 +75,7 @@ export function AuthProvider({ children }) {
 
   const reviewerLogin = async (email, password) => {
     const data = await api.reviewerLogin(email, password);
+    sessionStorage.removeItem(RECEIVER_LOGOUT_FLAG);
     setReviewerAccountToken(data.token);
     setReviewer(data.reviewer);
     return data;
@@ -80,43 +83,79 @@ export function AuthProvider({ children }) {
 
   const reviewerRegister = async (name, email, password) => {
     const data = await api.reviewerRegister(name, email, password);
+    sessionStorage.removeItem(RECEIVER_LOGOUT_FLAG);
     setReviewerAccountToken(data.token);
     setReviewer(data.reviewer);
     return data;
   };
 
+  const switchToReceiver = async (options = {}) => {
+    const force = !!options.force;
+    if (reviewerAccountToken) return { ok: true, source: 'existing' };
+    if (!force && sessionStorage.getItem(RECEIVER_LOGOUT_FLAG) === '1') {
+      return { ok: false, reason: 'logged-out' };
+    }
+    if (!token || !creator?.hasReceiverAccess) {
+      return { ok: false, reason: token ? 'not-allowed' : 'login-required' };
+    }
+
+    const data = await api.establishReceiverAccess();
+    sessionStorage.removeItem(RECEIVER_LOGOUT_FLAG);
+    setReviewerAccountToken(data.token);
+    setReviewer(data.reviewer);
+    return { ok: true, source: 'handoff' };
+  };
+
+  const switchToSender = async () => {
+    if (token) return { ok: true, source: 'existing' };
+    if (!reviewerAccountToken || !reviewer?.hasSenderAccess) {
+      return { ok: false, reason: reviewerAccountToken ? 'not-allowed' : 'login-required' };
+    }
+
+    const data = await api.establishSenderAccess();
+    setToken(data.token);
+    setCreator(data.creator);
+    return { ok: true, source: 'handoff' };
+  };
+
   const reviewerLogout = () => {
-    api.setReviewerAccountToken(null);
-    api.setReviewerToken(null);
+    sessionStorage.setItem(RECEIVER_LOGOUT_FLAG, '1');
+    api.clearReviewerSession();
     setReviewerAccountToken(null);
     setReviewer(null);
   };
 
   const logout = () => {
-    api.setCreatorToken(null);
+    sessionStorage.removeItem(RECEIVER_LOGOUT_FLAG);
+    api.logout();
     setToken(null);
     setCreator(null);
+    setReviewerAccountToken(null);
+    setReviewer(null);
   };
 
-  return (
-    <AuthContext.Provider
-      value={{
-        creator,
-        token,
-        reviewer,
-        reviewerAccountToken,
-        loading,
-        login,
-        register,
-        reviewerLogin,
-        reviewerRegister,
-        logout,
-        reviewerLogout,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      creator,
+      token,
+      reviewer,
+      reviewerAccountToken,
+      loading,
+      hasReceiverAccess: !!(reviewerAccountToken || creator?.hasReceiverAccess),
+      hasSenderAccess: !!(token || reviewer?.hasSenderAccess),
+      login,
+      register,
+      reviewerLogin,
+      reviewerRegister,
+      switchToReceiver,
+      switchToSender,
+      logout,
+      reviewerLogout,
+    }),
+    [creator, token, reviewer, reviewerAccountToken, loading]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

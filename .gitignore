@@ -20,6 +20,10 @@ yarn-error.log*
 # IDE/editor
 .vscode/
 .idea/
+.playwright/
+.playwright-cli/
+playwright-report/
+test-results/
 
 # OS files
 .DS_Store

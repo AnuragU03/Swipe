@@ -151,6 +151,40 @@ async function getSubmissionsBySession(sessionId) {
   ]);
 }
 
+async function getSubmissionsByReviewerEmail(reviewerEmail) {
+  const normalizedEmail = String(reviewerEmail || '').toLowerCase().trim();
+  if (!normalizedEmail) return [];
+
+  if (USE_MEMORY) {
+    return inMemoryStore.submissions.filter(
+      (submission) => String(submission.reviewerEmail || '').toLowerCase().trim() === normalizedEmail
+    );
+  }
+
+  return queryItems(
+    'submissions',
+    'SELECT * FROM c WHERE c.reviewerEmail = @reviewerEmail',
+    [{ name: '@reviewerEmail', value: normalizedEmail }]
+  );
+}
+
+async function getSubmissionsByReviewerName(reviewerName) {
+  const normalizedName = String(reviewerName || '').trim();
+  if (!normalizedName) return [];
+
+  if (USE_MEMORY) {
+    return inMemoryStore.submissions.filter(
+      (submission) => String(submission.reviewerName || '').trim() === normalizedName
+    );
+  }
+
+  return queryItems(
+    'submissions',
+    'SELECT * FROM c WHERE c.reviewerName = @reviewerName',
+    [{ name: '@reviewerName', value: normalizedName }]
+  );
+}
+
 async function getSubmissionByReviewer(sessionId, reviewerName) {
   if (USE_MEMORY) {
     return inMemoryStore.submissions.find(
@@ -247,6 +281,8 @@ module.exports = {
   getSessionsByCreator,
   getImagesBySession,
   getSubmissionsBySession,
+  getSubmissionsByReviewerEmail,
+  getSubmissionsByReviewerName,
   getSubmissionByReviewer,
   getSubmissionByReviewerEmail,
   getCreatorByEmail,

@@ -36,7 +36,7 @@ class ApiService {
   }
 
   async request(method, path, body = null, useReviewerToken = false, useReviewerAccountToken = false) {
-    const headers = { 'Content-Type': 'application/json' };
+    const headers = {};
     const token = useReviewerToken
       ? this.reviewerToken
       : useReviewerAccountToken
@@ -49,7 +49,12 @@ class ApiService {
 
     const options = { method, headers };
     if (body) {
-      options.body = JSON.stringify(body);
+      if (body instanceof FormData) {
+        options.body = body;
+      } else {
+        headers['Content-Type'] = 'application/json';
+        options.body = JSON.stringify(body);
+      }
     }
 
     const response = await fetch(`${API_BASE}${path}`, options);
@@ -94,6 +99,27 @@ class ApiService {
     this.setCreatorToken(null);
     this.setReviewerToken(null);
     this.setReviewerAccountToken(null);
+  }
+
+  clearCreatorSession() {
+    this.setCreatorToken(null);
+  }
+
+  clearReviewerSession() {
+    this.setReviewerToken(null);
+    this.setReviewerAccountToken(null);
+  }
+
+  async establishReceiverAccess() {
+    const data = await this.request('POST', '/auth/establish-receiver');
+    this.setReviewerAccountToken(data.token);
+    return data;
+  }
+
+  async establishSenderAccess() {
+    const data = await this.request('POST', '/reviewer/establish-sender', null, false, true);
+    this.setCreatorToken(data.token);
+    return data;
   }
 
   // ── Sessions (Creator) ──
@@ -142,7 +168,23 @@ class ApiService {
 
   // ── Images (Creator) ──
   async uploadImages(sessionId, images) {
-    // images: [{fileName, data (base64), contentType}]
+    if (!Array.isArray(images) || images.length === 0) {
+      throw new Error('No images provided');
+    }
+
+    if (images.length === 1 && images[0]?.file) {
+      const image = images[0];
+      const formData = new FormData();
+      formData.append('file', image.file, image.fileName || image.file.name || 'upload');
+      formData.append('fileName', image.fileName || image.file?.name || 'upload');
+      formData.append('contentType', image.contentType || image.file?.type || 'application/octet-stream');
+      if (image.templateChannel) formData.append('templateChannel', image.templateChannel);
+      if (image.templateText) formData.append('templateText', image.templateText);
+      if (image.rowId) formData.append('rowId', image.rowId);
+      if (image.rowOrder !== undefined && image.rowOrder !== null) formData.append('rowOrder', String(image.rowOrder));
+      return this.request('POST', `/sessions/${sessionId}/images`, formData);
+    }
+
     return this.request('POST', `/sessions/${sessionId}/images`, { images });
   }
 
@@ -205,6 +247,10 @@ class ApiService {
 
   async listReviewerSessions() {
     return this.request('GET', '/reviewer/sessions', null, false, true);
+  }
+
+  async getReviewerSessionHistory(sessionId) {
+    return this.request('GET', `/reviewer/sessions/${sessionId}/history`, null, false, true);
   }
 
   // ── Export ──

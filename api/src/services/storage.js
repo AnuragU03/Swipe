@@ -1,5 +1,6 @@
 const { BlobServiceClient, generateBlobSASQueryParameters, BlobSASPermissions, StorageSharedKeyCredential } = require('@azure/storage-blob');
 const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
 const path = require('path');
 
 let blobServiceClient = null;
@@ -51,6 +52,33 @@ async function uploadImage(sessionId, fileName, buffer, contentType) {
 
   const blockBlobClient = containerClient.getBlockBlobClient(blobName);
   await blockBlobClient.uploadData(buffer, {
+    blobHTTPHeaders: {
+      blobContentType: contentType,
+    },
+  });
+
+  return {
+    blobUrl: blockBlobClient.url,
+    blobName,
+  };
+}
+
+async function uploadImageFile(sessionId, fileName, filePath, contentType) {
+  const ext = path.extname(fileName) || '.jpg';
+  const blobName = `${sessionId}/${uuidv4()}${ext}`;
+
+  if (USE_MEMORY) {
+    const buffer = await fs.promises.readFile(filePath);
+    const dataUrl = `data:${contentType};base64,${buffer.toString('base64')}`;
+    inMemoryBlobs.set(blobName, { data: dataUrl, contentType });
+    return {
+      blobUrl: `/api/images/blob/${blobName}`,
+      blobName,
+    };
+  }
+
+  const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+  await blockBlobClient.uploadFile(filePath, {
     blobHTTPHeaders: {
       blobContentType: contentType,
     },
@@ -118,6 +146,7 @@ function getBlobData(blobName) {
 module.exports = {
   initStorage,
   uploadImage,
+  uploadImageFile,
   generateSignedUrl,
   deleteBlob,
   getBlobData,

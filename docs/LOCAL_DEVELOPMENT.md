@@ -4,58 +4,81 @@
 
 - Node.js 18+
 - npm
-- Optional: Docker
+- Optional: Docker Desktop
 
 ## Setup
 
-1. Install all dependencies:
+1. Install dependencies:
    - `npm run install:all`
-2. Create `.env` in repo root using `.env.example`.
+2. Create `.env` in repo root from `.env.example`.
 
 ## Run modes
 
-### Full local development
+### Standard development mode
 
 - Command: `npm run dev`
-- Starts:
-  - API workspace (`api`, via `func start` script)
-  - Frontend Vite app (`client`)
+- Runs frontend and backend dev workflows for iterative development.
 
-### Production-like local run
+### Production-like local mode
 
 1. Build frontend:
    - `npm run build`
-2. Start Node server:
+2. Start unified server:
    - `npm start`
 
-Server runs on `PORT` env var or `8080`.
+Server listens on `PORT` or defaults to `8080`.
+
+## Current functional flow to validate locally
+
+1. Creator login/register and dashboard load.
+2. Create session with client/project and expected reviewers.
+3. Upload multi-row post groups with platform/template metadata.
+4. Reviewer joins by name/email and submits decisions.
+5. Dashboard updates reviewer done/pending and feedback counts.
 
 ## Data behavior
 
-- If Cosmos DB and Blob Storage env vars are missing, app uses in-memory storage.
-- In-memory mode is useful for UI/dev testing but data is not persistent.
+- Without cloud env vars, app runs with in-memory fallback for DB/storage.
+- In-memory mode is non-persistent and best for UI and flow validation.
 
 ## Common tasks
 
+- Install all deps: `npm run install:all`
 - Build frontend: `npm run build`
-- Start backend/server: `npm start`
+- Start server: `npm start`
 - Docker build: `npm run docker:build`
 - Docker run: `npm run docker:run`
 
+## Environment variables
+
+Required for persistent cloud-backed local runs:
+
+- `COSMOS_ENDPOINT`
+- `COSMOS_KEY`
+- `COSMOS_DATABASE`
+- `AZURE_STORAGE_CONNECTION_STRING`
+- `AZURE_STORAGE_CONTAINER`
+- `JWT_SECRET`
+
 ## Troubleshooting
 
-### App boots but no saved data persists
+### Data not persisting
 
-Likely running in in-memory mode. Configure Azure env vars in `.env`.
+Likely running in in-memory mode. Configure Cosmos and Blob env vars.
 
-### Reviewer or creator auth failing unexpectedly
+### Reviewer history/status mismatch
 
-Check `JWT_SECRET` and token expiries in env.
+Ensure reviewer email is consistently provided during join and submit.
 
-### Upload issues
+### Upload/template rendering mismatch
 
-Verify Blob Storage connection string and container name.
+Verify payload includes `templateChannel`, `templateText`, `rowId`, and `rowOrder` for each image.
 
-### CORS or route mismatch
+### Auth failures
 
-Ensure requests target `/api/*` routes and app/server are running from same base origin in production mode.
+Check `JWT_SECRET` and expiry settings for creator/reviewer tokens.
+
+### API route errors
+
+Confirm requests are targeting `/api/*` paths and server is running on expected host/port.
+
