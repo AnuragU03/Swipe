@@ -1,7 +1,99 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
 import AnnotationView from '../components/AnnotationView';
+
+function formatRelativeTime(value) {
+  if (!value) return 'No recent activity';
+  const time = new Date(value).getTime();
+  if (!time) return 'No recent activity';
+  const delta = Math.max(0, Date.now() - time);
+  const minutes = Math.floor(delta / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString();
+}
+
+function normalizeText(value, fallback) {
+  const text = String(value || '').trim();
+  return text || fallback;
+}
+
+function openAsset(url) {
+  if (!url) return;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function isVideoAsset(asset) {
+  const source = String(asset?.contentType || asset?.fileName || '').toLowerCase();
+  return source.startsWith('video/') || /\.(mp4|mov|avi|webm|mkv)$/i.test(source);
+}
+
+function getAssetTypeLabel(asset) {
+  const contentType = String(asset?.contentType || asset?.fileName || '').toLowerCase();
+  if (isVideoAsset(asset)) return 'Video';
+  if (contentType.startsWith('audio/') || /\.(mp3|wav|ogg|aac|flac)$/i.test(asset?.fileName || '')) return 'Audio';
+  if (contentType === 'application/pdf' || /\.pdf$/i.test(asset?.fileName || '')) return 'PDF';
+  return 'Image';
+}
+
+function FileCard({ image, onDelete, deleting }) {
+  const previewUrl = image.url || image.signedUrl || '';
+  const isVideo = isVideoAsset(image);
+  const typeLabel = getAssetTypeLabel(image);
+
+  return (
+    <article className="asset-card">
+      <div className="asset-card-media">
+        {previewUrl ? (
+          isVideo ? (
+            <video src={previewUrl} muted playsInline preload="metadata" />
+          ) : (
+            <img src={previewUrl} alt={image.fileName || 'Asset'} />
+          )
+        ) : (
+          <div className="asset-card-fallback">{typeLabel}</div>
+        )}
+      </div>
+
+      <div className="asset-card-body">
+        <div className="asset-card-top">
+          <div className="asset-card-title">{normalizeText(image.fileName, 'Untitled asset')}</div>
+          <div className="asset-card-meta">{image.rowOrder ? `Post ${image.rowOrder}` : typeLabel}</div>
+        </div>
+
+        <div className="asset-card-actions asset-card-actions-below">
+          <button type="button" className="history-view-btn" onClick={() => openAsset(previewUrl)} disabled={!previewUrl}>
+            View
+          </button>
+          <button
+            type="button"
+            className="history-view-btn danger"
+            onClick={() => onDelete(image.id)}
+            disabled={deleting}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
+
+        <div className="asset-card-summary">
+          <span>Likes {image.likes || 0}</span>
+          <span>Dislikes {image.dislikes || 0}</span>
+          <span>Comments {(image.annotations || []).length}</span>
+        </div>
+      </div>
+    </article>
+  );
+}
 
 export default function SessionResults() {
   const { id } = useParams();
@@ -19,8 +111,9 @@ export default function SessionResults() {
     try {
       const data = await api.getSession(id);
       setSession(data.session);
+      setError('');
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Failed to load project details');
     } finally {
       setLoading(false);
     }
@@ -36,7 +129,7 @@ export default function SessionResults() {
     try {
       await api.exportSession(id, format);
     } catch (err) {
-      alert('Export failed: ' + err.message);
+      alert(`Export failed: ${err.message}`);
     }
   };
 
@@ -51,17 +144,18 @@ export default function SessionResults() {
       await api.deleteSession(id);
       navigate('/');
     } catch (err) {
-      alert('Delete failed: ' + err.message);
+      alert(`Delete failed: ${err.message}`);
     }
   };
 
   const handleDeleteImage = async (imageId) => {
+    if (!window.confirm('Delete this asset?')) return;
     setDeletingImage(imageId);
     try {
       await api.deleteImage(id, imageId);
       fetchData();
     } catch (err) {
-      alert('Failed to delete image: ' + err.message);
+      alert(`Failed to delete image: ${err.message}`);
     } finally {
       setDeletingImage(null);
     }
@@ -70,25 +164,37 @@ export default function SessionResults() {
   const reviewUrl = api.getPublicReviewUrl(id);
   const copyLink = async () => {
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(reviewUrl);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = reviewUrl;
-        ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
-        document.body.appendChild(ta);
-        ta.focus();
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      }
+      await navigator.clipboard.writeText(reviewUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
+    } catch {
       const input = document.querySelector('.share-link-url');
-      if (input) { input.focus(); input.select(); }
+      if (input) {
+        input.focus();
+        input.select();
+      }
     }
   };
+
+  const images = session?.images || [];
+  const submissions = session?.submissions || [];
+  const totalLikes = images.reduce((sum, item) => sum + (item.likes || 0), 0);
+  const totalDislikes = images.reduce((sum, item) => sum + (item.dislikes || 0), 0);
+  const totalAnnotations = images.reduce((sum, item) => sum + (item.annotations?.length || 0), 0);
+  const lastActivityAt = useMemo(() => {
+    const times = [
+      ...submissions.map((item) => item.submittedAt).filter(Boolean),
+      ...images.flatMap((item) => (item.annotations || []).map((annotation) => annotation.createdAt)).filter(Boolean),
+    ].map((value) => new Date(value).getTime());
+
+    if (!times.length) return null;
+    return new Date(Math.max(...times)).toISOString();
+  }, [images, submissions]);
+
+  const visibleSubmissions = useMemo(() => {
+    if (selectedReviewer === null) return submissions;
+    return submissions[selectedReviewer] ? [submissions[selectedReviewer]] : [];
+  }, [selectedReviewer, submissions]);
 
   if (loading) {
     return (
@@ -100,391 +206,294 @@ export default function SessionResults() {
 
   if (error) {
     return (
-      <div className="app-shell" style={{ justifyContent: 'center', alignItems: 'center', gap: 16 }}>
-        <div style={{ fontSize: 48 }}>😕</div>
-        <div className="error-box">{error}</div>
-        <button className="btn-secondary" onClick={() => navigate('/')} style={{ maxWidth: 200 }}>
-          ← Dashboard
-        </button>
+      <div className="app-shell">
+        <div className="page">
+          <div className="error-box">{error}</div>
+          <button type="button" className="btn-secondary" onClick={() => navigate('/')}>
+            Back to Dashboard
+          </button>
+        </div>
       </div>
     );
   }
 
   if (!session) return null;
 
-  const images = session.images || [];
-  const submissions = session.submissions || [];
-  const totalLikes = images.reduce((s, img) => s + (img.likes || 0), 0);
-  const totalDislikes = images.reduce((s, img) => s + (img.dislikes || 0), 0);
-  const totalAnnotations = images.reduce((s, img) => s + (img.annotations?.length || 0), 0);
-
   return (
     <div className="app-shell">
-      <div className="page">
-        {/* Header */}
-        <div className="header-bar" style={{ marginBottom: 20 }}>
-          <button className="btn-ghost" onClick={() => navigate('/')}>← Back</button>
-          <span className={`badge badge-${session.status}`}>
-            {session.status === 'active' ? '🟢' : '🔴'} {session.status}
-          </span>
-        </div>
-
-        <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 20 }} className="anim-fade-up">
-          {session.title}
-        </h2>
-        <div style={{ marginTop: -12, marginBottom: 16, color: 'var(--sub)', fontSize: 12 }}>
-          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{session.clientName || 'Client'}</span>
-          {' · '}
-          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{session.projectName || 'Project'}</span>
-          {' · '}
-          <span>Client ID: {session.clientId || 'N/A'}</span>
-          {' · '}
-          <span>Project ID: {session.projectId || 'N/A'}</span>
-        </div>
-
-        {/* Share link */}
-        <div className="share-link-box anim-fade-up" style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
-          <input
-            className="share-link-url"
-            type="text"
-            readOnly
-            value={reviewUrl}
-            onFocus={(e) => e.target.select()}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              wordBreak: 'normal',
-              overflowWrap: 'normal',
-            }}
-          />
-          <button onClick={copyLink} style={{ flexShrink: 0 }}>{copied ? '✓ Copied' : 'Copy Link'}</button>
-        </div>
-
-        {/* Stats */}
-        <div className="stats-grid anim-fade-up" style={{ marginBottom: 24 }}>
-          <div className="stat-card">
-            <div className="num">{submissions.length}</div>
-            <div className="label">Reviews</div>
-          </div>
-          <div className="stat-card">
-            <div className="num" style={{ color: 'var(--like)' }}>{totalLikes}</div>
-            <div className="label">Likes</div>
-          </div>
-          <div className="stat-card">
-            <div className="num" style={{ color: 'var(--dislike)' }}>{totalDislikes}</div>
-            <div className="label">Dislikes</div>
-          </div>
-          <div className="stat-card">
-            <div className="num" style={{ color: 'var(--accent)' }}>{totalAnnotations}</div>
-            <div className="label">Notes</div>
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 28, flexWrap: 'wrap' }}>
-          <button className="btn-secondary" onClick={toggleStatus} style={{ flex: 1, minWidth: 80, fontSize: 13 }}>
-            {session.status === 'active' ? '⏸ Close' : '▶ Reopen'}
-          </button>
-          <button className="btn-secondary" onClick={() => handleExport('xlsx')} style={{ flex: 1, minWidth: 80, fontSize: 13 }}>
-            📊 XLSX
-          </button>
-          <button className="btn-secondary" onClick={() => handleExport('csv')} style={{ flex: 1, minWidth: 80, fontSize: 13 }}>
-            📄 CSV
-          </button>
-          <button className="btn-danger" onClick={() => setShowDelete(true)} style={{ flex: 1, minWidth: 80, fontSize: 13 }}>
-            🗑 Delete
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="results-tabs" style={{ marginBottom: 24 }}>
-          {['files', 'reviews'].map((tab) => (
-            <button
-              key={tab}
-              className={`tab-btn ${activeTab === tab ? 'tab-btn-active' : ''}`}
-              onClick={() => setActiveTab(tab)}
-            >
-              {tab}
+      <div className="page results-page">
+        <header className="results-header">
+          <div className="results-header-main">
+            <button type="button" className="btn-back" onClick={() => navigate(-1)}>
+              &lt; Back
             </button>
-          ))}
+            <div className="logo">
+              Creative<span>Swipe</span>
+            </div>
+            <div className="results-header-meta">
+              <span className={`badge badge-${session.status}`}>{session.status}</span>
+              <button type="button" className="btn-ghost" onClick={() => navigate('/')}>
+                Dashboard
+              </button>
+            </div>
+          </div>
+          <div className="results-header-copy">
+            <div className="results-client-line">
+              {normalizeText(session.clientName, 'Client')} - {normalizeText(session.projectName || session.title, 'Project')}
+            </div>
+            <div className="results-project-name">{normalizeText(session.projectName || session.title, 'Project')}</div>
+            <div className="results-project-copy">
+              Review link, asset files, and reviewer feedback for this project.
+            </div>
+          </div>
+        </header>
+
+        <section className="results-panel">
+          <div className="share-link-box">
+            <input
+              className="share-link-url"
+              type="text"
+              readOnly
+              value={reviewUrl}
+              onFocus={(event) => event.target.select()}
+            />
+            <button type="button" className="share-link-action" onClick={copyLink}>
+              {copied ? 'Copied' : 'Copy Link'}
+            </button>
+          </div>
+
+          <div className="results-stats-grid">
+            <div className="stat-card">
+              <div className="num">{submissions.length}</div>
+              <div className="label">Reviews</div>
+            </div>
+            <div className="stat-card">
+              <div className="num" style={{ color: 'var(--like)' }}>{totalLikes}</div>
+              <div className="label">Positive</div>
+            </div>
+            <div className="stat-card">
+              <div className="num" style={{ color: 'var(--dislike)' }}>{totalDislikes}</div>
+              <div className="label">Negative</div>
+            </div>
+            <div className="stat-card">
+              <div className="num" style={{ color: 'var(--accent)' }}>{totalAnnotations}</div>
+              <div className="label">Comments</div>
+            </div>
+          </div>
+
+          <div className="results-summary-row">
+            <div className="results-summary-counts">
+              <span>Likes {totalLikes}</span>
+              <span>Dislikes {totalDislikes}</span>
+              <span>Comments {totalAnnotations}</span>
+            </div>
+            <div className="results-summary-time">{formatRelativeTime(lastActivityAt)}</div>
+          </div>
+        </section>
+
+        <section className="results-actions">
+          <button type="button" className="btn-secondary" onClick={toggleStatus}>
+            {session.status === 'active' ? 'Close Project' : 'Reopen Project'}
+          </button>
+          <button type="button" className="btn-secondary" onClick={() => handleExport('xlsx')}>
+            Export XLSX
+          </button>
+          <button type="button" className="btn-secondary" onClick={() => handleExport('csv')}>
+            Export CSV
+          </button>
+          <button type="button" className="btn-danger" onClick={() => setShowDelete(true)}>
+            Delete Current Review
+          </button>
+        </section>
+
+        <div className="results-tabs">
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'files' ? 'tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('files')}
+          >
+            Files
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'reviews' ? 'tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('reviews')}
+          >
+            Reviews
+          </button>
         </div>
 
-        {/* Files Tab */}
         {activeTab === 'files' && (
-          <div className="image-grid">
-            {images.map((img, i) => {
-              const ct = (img.contentType || img.fileName || '').toLowerCase();
-              const isVideo = ct.startsWith('video/') || /\.(mp4|mov|avi|webm|mkv)$/i.test(img.fileName || '');
-              const isAudio = ct.startsWith('audio/') || /\.(mp3|wav|ogg|aac|flac)$/i.test(img.fileName || '');
-              const isPdf = ct === 'application/pdf' || /\.pdf$/i.test(img.fileName || '');
-              const isImage = !isVideo && !isAudio && !isPdf;
-              const typeIcon = isVideo ? '🎬' : isAudio ? '🎵' : isPdf ? '📄' : null;
-              const typeLabel = isVideo ? 'VIDEO' : isAudio ? 'AUDIO' : isPdf ? 'PDF' : null;
-              const typeColor = isVideo ? '#45b7d1' : isAudio ? '#ff9ff3' : isPdf ? '#feca57' : null;
-
-              return (
-              <div key={img.id || i} className="image-thumb" style={{ aspectRatio: '3/4', position: 'relative' }}>
-                {isImage && <img src={img.url || img.signedUrl} alt="" />}
-                {isVideo && (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, rgba(69,183,209,0.15), rgba(69,183,209,0.05))' }}>
-                    <div style={{ fontSize: 40, marginBottom: 6 }}>🎬</div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#45b7d1', textAlign: 'center', padding: '0 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{img.fileName || 'Video'}</div>
-                  </div>
-                )}
-                {isAudio && (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, rgba(255,159,243,0.15), rgba(255,159,243,0.05))' }}>
-                    <div style={{ fontSize: 40, marginBottom: 6 }}>🎵</div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#ff9ff3', textAlign: 'center', padding: '0 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{img.fileName || 'Audio'}</div>
-                  </div>
-                )}
-                {isPdf && (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, rgba(254,202,87,0.15), rgba(254,202,87,0.05))' }}>
-                    <div style={{ fontSize: 40, marginBottom: 6 }}>📄</div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#feca57', textAlign: 'center', padding: '0 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{img.fileName || 'PDF'}</div>
-                  </div>
-                )}
-                {typeLabel && (
-                  <div style={{
-                    position: 'absolute', top: 6, left: 6,
-                    padding: '2px 8px', borderRadius: 6,
-                    background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
-                    fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
-                    color: typeColor, border: `1px solid ${typeColor}33`,
-                  }}>
-                    {typeIcon} {typeLabel}
-                  </div>
-                )}
-                <div className="image-thumb-badge">
-                  <span style={{ color: 'var(--like)' }}>👍{img.likes || 0}</span>
-                  <span style={{ color: 'var(--sub)' }}>·</span>
-                  <span style={{ color: 'var(--dislike)' }}>👎{img.dislikes || 0}</span>
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm(`Delete "${img.fileName || `Image ${i + 1}`}"?`)) {
-                      handleDeleteImage(img.id);
-                    }
-                  }}
-                  disabled={deletingImage === img.id}
-                  style={{
-                    position: 'absolute', top: 6, right: 6,
-                    width: 28, height: 28, borderRadius: '50%',
-                    background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,77,109,0.4)',
-                    color: 'var(--dislike)', fontSize: 14, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    opacity: deletingImage === img.id ? 0.4 : 1,
-                  }}
-                >
-                  {deletingImage === img.id ? '…' : '🗑'}
-                </button>
-              </div>
-              );
-            })}
-          </div>
+          <section className="asset-grid">
+            {images.length === 0 ? (
+              <div className="results-empty">No assets uploaded yet.</div>
+            ) : (
+              images.map((image) => (
+                <FileCard
+                  key={image.id}
+                  image={image}
+                  deleting={deletingImage === image.id}
+                  onDelete={handleDeleteImage}
+                />
+              ))
+            )}
+          </section>
         )}
 
-        {/* Reviews Tab */}
         {activeTab === 'reviews' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <section className="results-review-stack">
             {submissions.length === 0 ? (
-              <div style={{ textAlign: 'center', color: 'var(--sub)', padding: 40 }}>No reviews yet</div>
+              <div className="results-empty">No reviews yet.</div>
             ) : (
               <>
-                {/* Horizontal scrollable reviewer name chips */}
-                <div style={{
-                  display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8,
-                  WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
-                  msOverflowStyle: 'none',
-                }}>
-                  {submissions.map((sub, si) => {
-                    const isSelected = selectedReviewer === si;
-                    const likes = (sub.decisions || []).filter(d => d.liked).length;
-                    const dislikes = (sub.decisions || []).filter(d => !d.liked).length;
+                <div className="reviewer-chip-list">
+                  {submissions.map((submission, index) => {
+                    const likes = (submission.decisions || []).filter((item) => item.liked).length;
+                    const dislikes = (submission.decisions || []).filter((item) => !item.liked).length;
+                    const active = selectedReviewer === index;
                     return (
                       <button
-                        key={sub.id || si}
-                        onClick={() => setSelectedReviewer(isSelected ? null : si)}
-                        style={{
-                          flexShrink: 0, padding: '8px 14px', borderRadius: 20,
-                          border: isSelected ? '1.5px solid var(--accent)' : '1px solid var(--border)',
-                          background: isSelected ? 'rgba(232,255,71,0.1)' : 'var(--surface)',
-                          color: isSelected ? 'var(--accent)' : 'var(--text)',
-                          fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', gap: 6,
-                          transition: 'all 0.2s ease',
-                        }}
+                        key={submission.id || `${submission.reviewerName}-${index}`}
+                        type="button"
+                        className={`reviewer-chip${active ? ' reviewer-chip-active' : ''}`}
+                        onClick={() => setSelectedReviewer(active ? null : index)}
                       >
-                        {sub.reviewerName}
-                        <span style={{ fontSize: 11, opacity: 0.6 }}>👍{likes} 👎{dislikes}</span>
+                        <span>{normalizeText(submission.reviewerName, 'Reviewer')}</span>
+                        <span>{likes} up | {dislikes} down</span>
                       </button>
                     );
                   })}
                 </div>
 
-                {/* Selected reviewer detail, or all reviewers */}
-                {(() => {
-                  const visibleSubs = selectedReviewer !== null ? [submissions[selectedReviewer]] : submissions;
-                  return visibleSubs.map((sub, si) => {
-                    const subAnnotations = [];
-                    images.forEach(img => {
-                      (img.annotations || [])
-                        .filter(a => a.reviewer === sub.reviewerName || a.author === sub.reviewerName)
-                        .forEach(a => subAnnotations.push({ ...a, image: img }));
-                    });
+                {visibleSubmissions.map((submission, visibleIndex) => {
+                  const reviewerName = normalizeText(submission.reviewerName, 'Reviewer');
+                  const reviewerEmail = normalizeText(submission.reviewerEmail, '');
+                  const subAnnotations = [];
 
-                    return (
-                      <div key={sub.id || si} className="reviewer-card fade-in">
-                        <div className="reviewer-card-header">
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: 15 }}>{sub.reviewerName}</div>
-                            <div style={{ fontSize: 12, color: 'var(--sub)', marginTop: 2 }}>
-                              {new Date(sub.submittedAt).toLocaleString()}
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', gap: 10, fontSize: 14, fontWeight: 600 }}>
-                            <span style={{ color: 'var(--like)' }}>👍 {(sub.decisions || []).filter(d => d.liked).length}</span>
-                            <span style={{ color: 'var(--dislike)' }}>👎 {(sub.decisions || []).filter(d => !d.liked).length}</span>
-                            {subAnnotations.length > 0 && (
-                              <span style={{ color: 'var(--accent)' }}>📌 {subAnnotations.length}</span>
-                            )}
-                          </div>
-                        </div>
-                        <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          {(sub.decisions || []).map((dec, di) => {
-                            const img = images.find(im => im.id === dec.imageId);
-                            const relAnn = subAnnotations.filter(a => a.imageId === dec.imageId);
-                            const fct = (img?.contentType || img?.fileName || '').toLowerCase();
-                            const fIsVideo = fct.startsWith('video/') || /\.(mp4|mov|avi|webm|mkv)$/i.test(img?.fileName || '');
-                            const fIsAudio = fct.startsWith('audio/') || /\.(mp3|wav|ogg|aac|flac)$/i.test(img?.fileName || '');
-                            const fIsPdf = fct === 'application/pdf' || /\.pdf$/i.test(img?.fileName || '');
-                            const fIsImage = !fIsVideo && !fIsAudio && !fIsPdf;
-                            const fIcon = fIsVideo ? '🎬' : fIsAudio ? '🎵' : fIsPdf ? '📄' : null;
-                            const fColor = fIsVideo ? '#45b7d1' : fIsAudio ? '#ff9ff3' : fIsPdf ? '#feca57' : null;
-                            const fLabel = fIsVideo ? 'VIDEO' : fIsAudio ? 'AUDIO' : fIsPdf ? 'PDF' : null;
-                            return (
-                              <div key={di} style={{
-                                padding: '10px 12px',
-                                background: dec.liked ? 'rgba(61,255,143,0.05)' : 'rgba(255,77,109,0.05)',
-                                borderRadius: 10,
-                                border: `1px solid ${dec.liked ? 'rgba(61,255,143,0.12)' : 'rgba(255,77,109,0.12)'}`,
-                              }}>
-                                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                                  <div style={{ width: 40, height: 40, borderRadius: 8, overflow: 'hidden', flexShrink: 0, background: 'var(--surface-2)', position: 'relative' }}>
-                                    {img && fIsImage && <img src={img.url || img.signedUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
-                                    {img && !fIsImage && (
-                                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `linear-gradient(135deg, ${fColor}25, ${fColor}0d)` }}>
-                                        <span style={{ fontSize: 20 }}>{fIcon}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                      {img?.fileName || `File ${di + 1}`}
-                                    </div>
-                                    {fLabel && (
-                                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: fColor, marginTop: 2 }}>
-                                        {fIcon} {fLabel}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div style={{ fontSize: 18, flexShrink: 0 }}>{dec.liked ? '👍' : '👎'}</div>
-                                </div>
-                                {relAnn.length > 0 && (
-                                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                    {relAnn.map((ann, ai) => (
-                                      <div key={ai} style={{
-                                        display: 'flex', gap: 8, alignItems: 'flex-start',
-                                        padding: '6px 10px', borderRadius: 8,
-                                        background: 'rgba(232,255,71,0.06)',
-                                        border: '1px solid rgba(232,255,71,0.1)',
-                                      }}>
-                                        <span style={{
-                                          width: 18, height: 18, borderRadius: '50%', background: 'var(--accent)',
-                                          color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                          fontSize: 10, fontWeight: 800, flexShrink: 0, marginTop: 1,
-                                        }}>{ai + 1}</span>
-                                        <div style={{ fontSize: 13, lineHeight: 1.4, color: 'var(--text)' }}>
-                                          {ann.comment}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {/* Pin overview for this reviewer */}
-                        {subAnnotations.length > 0 && (
-                          <div style={{ padding: '0 10px 10px' }}>
-                            {[...new Set(subAnnotations.map(a => a.imageId))].map(imgId => {
-                              const img = images.find(im => im.id === imgId);
-                              const pins = subAnnotations.filter(a => a.imageId === imgId);
-                              if (!img) return null;
-                              const pct = (img.contentType || img.fileName || '').toLowerCase();
-                              const pIsImage = !pct.startsWith('video/') && !pct.startsWith('audio/') && pct !== 'application/pdf' && !/\.(mp4|mov|avi|webm|mkv|mp3|wav|ogg|aac|flac|pdf)$/i.test(img.fileName || '');
-                              return (
-                                <div key={imgId} style={{ marginTop: 10 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--sub)', marginBottom: 8 }}>
-                                    📌 Pins on {img.fileName || 'File'}
-                                  </div>
-                                  {pIsImage ? (
-                                    <AnnotationView annotations={pins} imageUrl={img.url || img.signedUrl} />
-                                  ) : (
-                                    <div style={{ padding: 12, background: 'var(--surface)', borderRadius: 10, border: '1px solid var(--border)' }}>
-                                      {pins.map((ann, ai) => (
-                                        <div key={ai} style={{
-                                          display: 'flex', gap: 8, alignItems: 'flex-start',
-                                          padding: '6px 10px', borderRadius: 8, marginBottom: 4,
-                                          background: 'rgba(232,255,71,0.06)',
-                                          border: '1px solid rgba(232,255,71,0.1)',
-                                        }}>
-                                          <span style={{
-                                            width: 18, height: 18, borderRadius: '50%', background: 'var(--accent)',
-                                            color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                            fontSize: 10, fontWeight: 800, flexShrink: 0, marginTop: 1,
-                                          }}>{ai + 1}</span>
-                                          <div style={{ fontSize: 13, lineHeight: 1.4, color: 'var(--text)' }}>
-                                            {ann.comment}
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
+                  images.forEach((image) => {
+                    (image.annotations || [])
+                      .filter((annotation) => {
+                        const author = normalizeText(annotation.reviewer || annotation.author, '');
+                        const email = normalizeText(annotation.reviewerEmail || annotation.email, '');
+                        if (reviewerEmail && email) return email.toLowerCase() === reviewerEmail.toLowerCase();
+                        return author === reviewerName;
+                      })
+                      .forEach((annotation) => subAnnotations.push({ ...annotation, image }));
                   });
-                })()}
+
+                  const likes = (submission.decisions || []).filter((item) => item.liked).length;
+                  const dislikes = (submission.decisions || []).filter((item) => !item.liked).length;
+
+                  return (
+                    <article key={submission.id || visibleIndex} className="reviewer-card">
+                      <div className="reviewer-card-header">
+                        <div>
+                          <div className="reviewer-name-title">{reviewerName}</div>
+                          <div className="results-review-time">{formatDateTime(submission.submittedAt)}</div>
+                        </div>
+                        <div className="results-summary-counts">
+                          <span>{likes} up</span>
+                          <span>{dislikes} down</span>
+                          <span>{subAnnotations.length} comments</span>
+                        </div>
+                      </div>
+
+                      <div className="history-list-panel">
+                        {(submission.decisions || []).map((decision, index) => {
+                          const image = images.find((item) => item.id === decision.imageId);
+                          const previewUrl = image?.url || image?.signedUrl || '';
+                          const comments = subAnnotations.filter((item) => item.imageId === decision.imageId);
+
+                          return (
+                            <div key={`${decision.imageId}-${index}`} className="history-comment-card">
+                              <div className="history-card">
+                                <div className="history-card-main">
+                                  <div className="history-thumb">
+                                    {previewUrl ? (
+                                      isVideoAsset(image) ? (
+                                        <video src={previewUrl} muted playsInline preload="metadata" />
+                                      ) : (
+                                        <img src={previewUrl} alt={image?.fileName || 'Asset'} />
+                                      )
+                                    ) : (
+                                      <span className="history-thumb-fallback">No preview</span>
+                                    )}
+                                  </div>
+
+                                  <div className="history-card-copy">
+                                    <div className="history-card-title">
+                                      {normalizeText(image?.fileName, `Asset ${index + 1}`)}
+                                    </div>
+                                    <div className="history-card-meta">
+                                      {image?.rowOrder ? `Post ${image.rowOrder}` : getAssetTypeLabel(image)}
+                                    </div>
+                                    <div className="history-card-meta">
+                                      {decision.liked ? 'Approved' : 'Rejected'}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="history-card-side">
+                                  <span className={`history-status ${decision.liked ? 'history-status-like' : 'history-status-dislike'}`}>
+                                    {decision.liked ? 'Approved' : 'Rejected'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="history-view-btn"
+                                    onClick={() => openAsset(previewUrl)}
+                                    disabled={!previewUrl}
+                                  >
+                                    View
+                                  </button>
+                                </div>
+                              </div>
+
+                              {comments.length > 0 && (
+                                <div className="history-comment-list">
+                                  {comments.map((comment, commentIndex) => (
+                                    <div key={`${decision.imageId}-comment-${commentIndex}`} className="history-comment-item">
+                                      <div className="history-comment-index">{commentIndex + 1}</div>
+                                      <div className="history-comment-copy">
+                                        <div>{normalizeText(comment.comment, 'No comment')}</div>
+                                        <div className="history-card-meta">
+                                          Pin at x:{Math.round(Number(comment.x) || 0)} y:{Math.round(Number(comment.y) || 0)}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {comments.length > 0 && previewUrl && !isVideoAsset(image) && (
+                                <div className="annotation-panel">
+                                  <AnnotationView annotations={comments} imageUrl={previewUrl} />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </article>
+                  );
+                })}
               </>
             )}
-          </div>
+          </section>
         )}
       </div>
 
-      {/* Delete Confirmation Dialog */}
       {showDelete && (
         <div className="confirm-overlay" onClick={() => setShowDelete(false)}>
-          <div className="confirm-dialog" onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>🗑</div>
-            <h3 style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Delete Session?</h3>
-            <p style={{ fontSize: 14, color: 'var(--sub)', lineHeight: 1.5, marginBottom: 20 }}>
-              This will permanently delete all images, reviews, and annotations. This cannot be undone.
+          <div className="confirm-dialog" onClick={(event) => event.stopPropagation()}>
+            <h3 className="confirm-title">Delete current review?</h3>
+            <p className="confirm-copy">
+              This removes the current uploaded review set and all of its assets and comments.
             </p>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn-secondary" onClick={() => setShowDelete(false)} style={{ flex: 1 }}>
+            <div className="confirm-actions">
+              <button type="button" className="btn-secondary" onClick={() => setShowDelete(false)}>
                 Cancel
               </button>
-              <button className="btn-danger" onClick={handleDelete} style={{ flex: 1 }}>
+              <button type="button" className="btn-danger" onClick={handleDelete}>
                 Delete
               </button>
             </div>

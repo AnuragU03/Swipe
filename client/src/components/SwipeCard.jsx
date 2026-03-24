@@ -19,9 +19,12 @@ export default function SwipeCard({
   disabled = false,
   pinMode = false,
   onPinModeUsed,
+  onPinModeTouchStart,
   navigationMode = false,
 }) {
   const cardRef = useRef(null);
+  const nameInputRef = useRef(null);
+  const commentInputRef = useRef(null);
   const startRef = useRef({ x: 0, y: 0, time: 0 });
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -43,6 +46,7 @@ export default function SwipeCard({
       if (disabled || isAnimating || showAnnotationInput) return;
 
       if (pinMode && onAnnotationAdd && cardRef.current) {
+        onPinModeTouchStart?.();
         const rect = cardRef.current.getBoundingClientRect();
         const x = ((e.clientX - rect.left) / rect.width) * 100;
         const y = ((e.clientY - rect.top) / rect.height) * 100;
@@ -55,7 +59,7 @@ export default function SwipeCard({
       setIsDragging(true);
       startRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
     },
-    [disabled, isAnimating, showAnnotationInput, pinMode, onAnnotationAdd, annotationName]
+    [disabled, isAnimating, showAnnotationInput, pinMode, onAnnotationAdd, annotationName, onPinModeTouchStart]
   );
 
   const handlePointerMove = useCallback(
@@ -101,6 +105,7 @@ export default function SwipeCard({
 
       if (Math.abs(dx) < 5 && Math.abs(dy) < 5 && dt < 300) {
         if (pinMode && onAnnotationAdd && cardRef.current) {
+          onPinModeTouchStart?.();
           const rect = cardRef.current.getBoundingClientRect();
           const x = ((e.clientX - rect.left) / rect.width) * 100;
           const y = ((e.clientY - rect.top) / rect.height) * 100;
@@ -132,6 +137,23 @@ export default function SwipeCard({
       };
     }
   }, [isDragging, handlePointerMove, handlePointerUp]);
+
+  useEffect(() => {
+    if (!showAnnotationInput) return;
+
+    const focusTarget = pinStep === 'name' ? nameInputRef.current : commentInputRef.current;
+    if (!focusTarget) return;
+
+    const timer = window.requestAnimationFrame(() => {
+      focusTarget.focus({ preventScroll: false });
+      const value = focusTarget.value || '';
+      if (typeof focusTarget.setSelectionRange === 'function') {
+        focusTarget.setSelectionRange(value.length, value.length);
+      }
+    });
+
+    return () => window.cancelAnimationFrame(timer);
+  }, [showAnnotationInput, pinStep]);
 
   const handleAnnotationSubmit = () => {
     if (pinStep === 'name') {
@@ -281,11 +303,11 @@ export default function SwipeCard({
                 <>
                   <label className="field-label">YOUR NAME</label>
                   <input
+                    ref={nameInputRef}
                     className="field"
                     placeholder="Enter your name"
                     value={annotationName}
                     onChange={(e) => setAnnotationName(e.target.value)}
-                    autoFocus
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleAnnotationSubmit();
                       if (e.key === 'Escape') setShowAnnotationInput(null);
@@ -296,12 +318,12 @@ export default function SwipeCard({
                 <>
                   <label className="field-label">ADD COMMENT</label>
                   <textarea
+                    ref={commentInputRef}
                     className="field"
                     placeholder="What should be changed here?"
                     rows={2}
                     value={annotationComment}
                     onChange={(e) => setAnnotationComment(e.target.value)}
-                    autoFocus
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();

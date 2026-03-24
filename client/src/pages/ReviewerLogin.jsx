@@ -2,17 +2,23 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-export default function Login() {
+export default function ReviewerLogin() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { reviewerLogin, reviewerRegister, reviewer, loading: authLoading } = useAuth();
+
   const [isRegister, setIsRegister] = useState(false);
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const { login, register } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
+  useEffect(() => {
+    if (!authLoading && reviewer) {
+      navigate('/reviewer', { replace: true });
+    }
+  }, [authLoading, reviewer, navigate]);
 
   useEffect(() => {
     const state = location.state || {};
@@ -29,13 +35,18 @@ export default function Login() {
 
     try {
       if (isRegister) {
-        await register(email.trim(), password, name.trim());
+        await reviewerRegister(name.trim(), email.trim(), password);
       } else {
-        await login(email.trim(), password);
+        await reviewerLogin(email.trim(), password);
       }
-      navigate('/', { replace: true });
+      navigate('/reviewer', { replace: true });
     } catch (err) {
-      setError(err.message || 'Authentication failed');
+      if (!isRegister && err?.data?.code === 'RECEIVER_ACCOUNT_NOT_FOUND') {
+        setIsRegister(true);
+        setError('No receiver account was found for this email. Create one to continue.');
+      } else {
+        setError(err.message || 'Authentication failed');
+      }
     } finally {
       setLoading(false);
     }
@@ -49,13 +60,13 @@ export default function Login() {
             Creative<span>Swipe</span>
           </div>
           <div style={{ color: 'var(--sub)', fontSize: 13 }}>
-            Collaborative Creative Review Platform
+            Receiver Dashboard Access
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="fade-in" style={{ animationDelay: '0.1s' }}>
           <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 16, textAlign: 'center' }}>
-            {isRegister ? 'Create Account' : 'Welcome Back'}
+            {isRegister ? 'Create Receiver Account' : 'Receiver Sign In'}
           </h2>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -96,16 +107,6 @@ export default function Login() {
                 required
                 minLength={6}
               />
-              {!isRegister && (
-                <button
-                  type="button"
-                  className="link-button"
-                  onClick={() => setError('Please contact the support staff or the admin')}
-                  style={{ marginTop: 10 }}
-                >
-                  Forgot Password?
-                </button>
-              )}
             </div>
 
             {error && <div className="error-box">{error}</div>}
@@ -116,13 +117,22 @@ export default function Login() {
               disabled={loading}
               style={{ marginTop: 2, width: '100%' }}
             >
-              {loading ? 'Please wait...' : isRegister ? 'Create Account' : 'Sign In'}
+              {loading ? 'Please wait...' : isRegister ? 'Create Account' : 'Open Receiver Dashboard'}
+            </button>
+
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => navigate('/login')}
+              style={{ width: '100%' }}
+            >
+              Go to Sender Login
             </button>
           </div>
         </form>
 
         <div className="fade-in" style={{ textAlign: 'center', marginTop: 14, fontSize: 13, color: 'var(--sub)', animationDelay: '0.2s' }}>
-          {isRegister ? 'Already have an account?' : "Don't have an account?"}{' '}
+          {isRegister ? 'Already have a receiver account?' : "Don't have a receiver account?"}{' '}
           <button
             type="button"
             onClick={() => {

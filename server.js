@@ -1,6 +1,9 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const cors = require('cors');
+const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcryptjs');
 const {
@@ -16,6 +19,18 @@ const { generateExport } = require('./api/src/services/exportService');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+const MAX_ACCOUNT_STORAGE_BYTES = 500 * 1024 * 1024;
+const uploadTempDir = path.join(os.tmpdir(), 'creativeswipe-uploads');
+fs.mkdirSync(uploadTempDir, { recursive: true });
+const uploadMiddleware = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadTempDir),
+    filename: (_req, file, cb) => cb(null, `${uuidv4()}${path.extname(file.originalname || '') || '.bin'}`),
+  }),
+  limits: {
+    fileSize: MAX_ACCOUNT_STORAGE_BYTES,
+  },
+});
 app.set('trust proxy', true);
 
 // ── Middleware ──
@@ -177,6 +192,38 @@ async function getReviewerOrCreatorByEmail(email) {
   return null;
 }
 
+async function getReviewerById(reviewerId) {
+  return db.getItem('reviewers', reviewerId, reviewerId);
+}
+
+async function getCreatorStorageUsageBytes(creatorId) {
+  const sessions = await db.getSessionsByCreator(creatorId);
+  let total = 0;
+
+  for (const session of sessions) {
+    const images = await db.getImagesBySession(session.id);
+    total += images.reduce((sum, image) => sum + (Number(image.fileSize) || 0), 0);
+  }
+
+  return total;
+}
+
+async function getCreatorCapabilities(creator) {
+  if (!creator?.email) {
+    return { hasReceiverAccess: false };
+  }
+  const reviewer = await db.getReviewerByEmail(creator.email.toLowerCase().trim());
+  return { hasReceiverAccess: !!reviewer };
+}
+
+async function getReviewerCapabilities(reviewer) {
+  if (!reviewer?.email) {
+    return { hasSenderAccess: false };
+  }
+  const creator = await db.getCreatorByEmail(reviewer.email.toLowerCase().trim());
+  return { hasSenderAccess: !!creator };
+}
+
 async function deleteSessionCascade(sessionId, creatorId) {
   const [images, submissions, assignments] = await Promise.all([
     db.getImagesBySession(sessionId),
@@ -243,7 +290,16 @@ app.post('/api/auth/register', async (req, res) => {
     };
     await db.createItem('creators', creator);
     const token = generateCreatorToken(creator.id, creator.email);
-    res.status(201).json({ token, creator: { id: creator.id, email: creator.email, name: creator.name } });
+    const capabilities = await getCreatorCapabilities(creator);
+    res.status(201).json({
+      token,
+      creator: {
+        id: creator.id,
+        email: creator.email,
+        name: creator.name,
+        ...capabilities,
+      },
+    });
   } catch (err) {
     console.error('Registration error:', err);
     res.status(500).json({ error: 'Registration failed' });
@@ -264,7 +320,16 @@ app.post('/api/auth/login', async (req, res) => {
     if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
 
     const token = generateCreatorToken(creator.id, creator.email);
-    res.json({ token, creator: { id: creator.id, email: creator.email, name: creator.name } });
+    const capabilities = await getCreatorCapabilities(creator);
+    res.json({
+      token,
+      creator: {
+        id: creator.id,
+        email: creator.email,
+        name: creator.name,
+        ...capabilities,
+      },
+    });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
@@ -281,7 +346,7 @@ app.post('/api/reviewer/register', async (req, res) => {
     }
 
     const normalizedEmail = email.toLowerCase().trim();
-    const existing = await getReviewerOrCreatorByEmail(normalizedEmail);
+    const existing = await db.getReviewerByEmail(normalizedEmail);
     if (existing) {
       const samePassword = await bcrypt.compare(password, existing.passwordHash);
       if (!samePassword) {
@@ -289,9 +354,10 @@ app.post('/api/reviewer/register', async (req, res) => {
       }
 
       const token = generateReviewerAccountToken(existing.id, existing.email, existing.name);
+      const capabilities = await getReviewerCapabilities(existing);
       return res.status(200).json({
         token,
-        reviewer: { id: existing.id, email: existing.email, name: existing.name },
+        reviewer: { id: existing.id, email: existing.email, name: existing.name, ...capabilities },
       });
     }
 
@@ -307,9 +373,10 @@ app.post('/api/reviewer/register', async (req, res) => {
     await db.createItem('reviewers', reviewer);
     const token = generateReviewerAccountToken(reviewer.id, reviewer.email, reviewer.name);
 
+    const capabilities = await getReviewerCapabilities(reviewer);
     return res.status(201).json({
       token,
-      reviewer: { id: reviewer.id, email: reviewer.email, name: reviewer.name },
+      reviewer: { id: reviewer.id, email: reviewer.email, name: reviewer.name, ...capabilities },
     });
   } catch (err) {
     console.error('Reviewer registration error:', err);
@@ -326,14 +393,24 @@ app.post('/api/reviewer/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const account = await getReviewerOrCreatorByEmail(email.toLowerCase().trim());
-    if (!account) return res.status(401).json({ error: 'Invalid email or password' });
+    const normalizedEmail = email.toLowerCase().trim();
+    const account = await db.getReviewerByEmail(normalizedEmail);
+    if (!account) {
+      return res.status(404).json({
+        error: 'Receiver account not found for this email',
+        code: 'RECEIVER_ACCOUNT_NOT_FOUND',
+      });
+    }
 
     const ok = await bcrypt.compare(password, account.passwordHash);
     if (!ok) return res.status(401).json({ error: 'Invalid email or password' });
 
     const token = generateReviewerAccountToken(account.id, account.email, account.name);
-    return res.json({ token, reviewer: { id: account.id, email: account.email, name: account.name } });
+    const capabilities = await getReviewerCapabilities(account);
+    return res.json({
+      token,
+      reviewer: { id: account.id, email: account.email, name: account.name, ...capabilities },
+    });
   } catch (err) {
     console.error('Reviewer login error:', err);
     return res.status(500).json({ error: 'Reviewer login failed' });
@@ -347,12 +424,67 @@ app.get('/api/reviewer/me', async (req, res) => {
   if (!auth.valid) return res.status(auth.status).json({ error: auth.error });
 
   try {
-    const user = await getReviewerOrCreatorById(auth.reviewer.sub);
+    const user = await getReviewerById(auth.reviewer.sub);
     if (!user) return res.status(404).json({ error: 'Reviewer not found' });
-    return res.json({ id: user.id, email: user.email, name: user.name });
+    const capabilities = await getReviewerCapabilities(user);
+    return res.json({ id: user.id, email: user.email, name: user.name, ...capabilities });
   } catch (err) {
     console.error('Reviewer profile error:', err);
     return res.status(500).json({ error: 'Failed to get reviewer profile' });
+  }
+});
+
+// POST /api/auth/establish-receiver
+app.post('/api/auth/establish-receiver', async (req, res) => {
+  await ensureInit();
+  const auth = requireCreator(req);
+  if (!auth.valid) return res.status(auth.status).json({ error: auth.error });
+
+  try {
+    const creator = await db.getItem('creators', auth.creator.sub, auth.creator.sub);
+    if (!creator) return res.status(404).json({ error: 'Creator not found' });
+
+    const reviewer = await db.getReviewerByEmail(creator.email.toLowerCase().trim());
+    if (!reviewer) {
+      return res.status(403).json({ error: 'Receiver access is not enabled for this account' });
+    }
+
+    const token = generateReviewerAccountToken(reviewer.id, reviewer.email, reviewer.name);
+    const capabilities = await getReviewerCapabilities(reviewer);
+    return res.json({
+      token,
+      reviewer: { id: reviewer.id, email: reviewer.email, name: reviewer.name, ...capabilities },
+    });
+  } catch (err) {
+    console.error('Establish receiver access error:', err);
+    return res.status(500).json({ error: 'Failed to establish receiver access' });
+  }
+});
+
+// POST /api/reviewer/establish-sender
+app.post('/api/reviewer/establish-sender', async (req, res) => {
+  await ensureInit();
+  const auth = requireReviewerAccount(req);
+  if (!auth.valid) return res.status(auth.status).json({ error: auth.error });
+
+  try {
+    const reviewer = await getReviewerById(auth.reviewer.sub);
+    if (!reviewer) return res.status(404).json({ error: 'Reviewer not found' });
+
+    const creator = await db.getCreatorByEmail(reviewer.email.toLowerCase().trim());
+    if (!creator) {
+      return res.status(403).json({ error: 'Sender access is not enabled for this account' });
+    }
+
+    const token = generateCreatorToken(creator.id, creator.email);
+    const capabilities = await getCreatorCapabilities(creator);
+    return res.json({
+      token,
+      creator: { id: creator.id, email: creator.email, name: creator.name, ...capabilities },
+    });
+  } catch (err) {
+    console.error('Establish sender access error:', err);
+    return res.status(500).json({ error: 'Failed to establish sender access' });
   }
 });
 
@@ -394,17 +526,46 @@ app.get('/api/reviewer/sessions', async (req, res) => {
   if (!auth.valid) return res.status(auth.status).json({ error: auth.error });
 
   try {
-    const assignments = await db.getReviewerAssignments(auth.reviewer.sub);
-    const sessions = [];
+    const reviewerIdentity = await getReviewerById(auth.reviewer.sub);
+    const reviewerEmail = normalizeEmail(reviewerIdentity?.email || auth.reviewer.email || '');
+    const reviewerName = String(reviewerIdentity?.name || auth.reviewer.name || '').trim();
 
-    for (const assignment of assignments) {
+    const [byEmail, byName] = await Promise.all([
+      reviewerEmail ? db.getSubmissionsByReviewerEmail(reviewerEmail) : Promise.resolve([]),
+      reviewerEmail ? Promise.resolve([]) : reviewerName ? db.getSubmissionsByReviewerName(reviewerName) : Promise.resolve([]),
+    ]);
+
+    const dedupedSubmissionsBySession = new Map();
+    [...byEmail, ...byName].forEach((submission) => {
+      const sessionId = submission.sessionId;
+      if (!sessionId) return;
+
+      const existing = dedupedSubmissionsBySession.get(sessionId);
+      if (!existing) {
+        dedupedSubmissionsBySession.set(sessionId, submission);
+        return;
+      }
+
+      const existingTs = new Date(existing.submittedAt || 0).getTime();
+      const nextTs = new Date(submission.submittedAt || 0).getTime();
+      if (nextTs >= existingTs) {
+        dedupedSubmissionsBySession.set(sessionId, submission);
+      }
+    });
+
+    const sessions = [];
+    for (const [sessionId, reviewerSubmission] of dedupedSubmissionsBySession.entries()) {
       const found = await db.queryItems('sessions', 'SELECT * FROM c WHERE c.id = @id', [
-        { name: '@id', value: assignment.sessionId },
+        { name: '@id', value: sessionId },
       ]);
       const session = found[0];
       if (!session) continue;
 
-      const submissions = await db.getSubmissionsBySession(session.id);
+      const images = await db.getImagesBySession(session.id);
+      const postCount = new Set(
+        images.map((img) => `${img.rowId || ''}-${Number(img.rowOrder) || 0}`).filter((key) => key !== '-0')
+      ).size;
+
       sessions.push({
         id: session.id,
         title: session.title,
@@ -414,17 +575,128 @@ app.get('/api/reviewer/sessions', async (req, res) => {
         projectName: session.projectName,
         status: session.status,
         imageCount: session.imageCount || 0,
-        submissionCount: submissions.length,
+        postCount,
+        previewImages: images.slice(0, 8).map((img) => ({
+          id: img.id,
+          fileName: img.fileName,
+          contentType: img.contentType || null,
+          rowId: img.rowId || null,
+          rowOrder: Number(img.rowOrder) || null,
+          url: storage.generateSignedUrl(img.blobName),
+          signedUrl: storage.generateSignedUrl(img.blobName),
+        })),
+        reviewerSubmissionCount: 1,
+        reviewerLikeCount: (reviewerSubmission?.decisions || []).filter((item) => item.liked).length,
+        reviewerDislikeCount: (reviewerSubmission?.decisions || []).filter((item) => !item.liked).length,
+        reviewerDecisionCount: (reviewerSubmission?.decisions || []).length,
+        reviewerAnnotationCount: (reviewerSubmission?.annotations || []).length,
+        reviewerSubmittedAt: reviewerSubmission?.submittedAt || null,
+        reviewerStatus: 'done',
         updatedAt: session.updatedAt || session.createdAt,
-        claimedAt: assignment.claimedAt,
       });
     }
 
-    sessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    sessions.sort((a, b) => {
+      const aTime = new Date(a.reviewerSubmittedAt || a.updatedAt || 0).getTime();
+      const bTime = new Date(b.reviewerSubmittedAt || b.updatedAt || 0).getTime();
+      return bTime - aTime;
+    });
     return res.json({ sessions });
   } catch (err) {
     console.error('Reviewer sessions error:', err);
     return res.status(500).json({ error: 'Failed to load reviewer sessions' });
+  }
+});
+
+// GET /api/reviewer/sessions/:id/history
+app.get('/api/reviewer/sessions/:id/history', async (req, res) => {
+  await ensureInit();
+  const auth = requireReviewerAccount(req);
+  if (!auth.valid) return res.status(auth.status).json({ error: auth.error });
+
+  const sessionId = req.params.id;
+  try {
+    const reviewerIdentity = await getReviewerById(auth.reviewer.sub);
+    const reviewerEmail = normalizeEmail(reviewerIdentity?.email || auth.reviewer.email || '');
+    const reviewerName = String(reviewerIdentity?.name || auth.reviewer.name || '').trim();
+
+    const sessions = await db.queryItems('sessions', 'SELECT * FROM c WHERE c.id = @id', [
+      { name: '@id', value: sessionId },
+    ]);
+    const session = sessions[0];
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+
+    const submissions = await db.getSubmissionsBySession(sessionId);
+    const reviewerSubmission = submissions
+      .filter((submission) => {
+        const submissionEmail = normalizeEmail(submission.reviewerEmail);
+        if (reviewerEmail && submissionEmail) {
+          return submissionEmail === reviewerEmail;
+        }
+        if (reviewerEmail) {
+          return false;
+        }
+        return String(submission.reviewerName || '').trim() === reviewerName;
+      })
+      .sort((a, b) => {
+        const aTime = new Date(a.submittedAt || 0).getTime();
+        const bTime = new Date(b.submittedAt || 0).getTime();
+        return bTime - aTime;
+      })[0];
+
+    if (!reviewerSubmission) {
+      return res.status(404).json({ error: 'No submission found for this reviewer in the selected session' });
+    }
+
+    const images = await db.getImagesBySession(sessionId);
+    const imageById = new Map(images.map((img) => [img.id, img]));
+
+    const decisions = (reviewerSubmission.decisions || []).map((decision) => {
+      const image = imageById.get(decision.imageId);
+      return {
+        imageId: decision.imageId,
+        liked: !!decision.liked,
+        fileName: image?.fileName || null,
+        rowOrder: Number(image?.rowOrder) || null,
+        url: image?.blobName ? storage.generateSignedUrl(image.blobName) : null,
+      };
+    });
+
+    const annotations = (reviewerSubmission.annotations || []).map((annotation) => {
+      const image = imageById.get(annotation.imageId);
+      return {
+        imageId: annotation.imageId,
+        comment: annotation.comment || '',
+        x: annotation.x,
+        y: annotation.y,
+        createdAt: annotation.createdAt || reviewerSubmission.submittedAt,
+        fileName: image?.fileName || null,
+        rowOrder: Number(image?.rowOrder) || null,
+        url: image?.blobName ? storage.generateSignedUrl(image.blobName) : null,
+      };
+    });
+
+    return res.json({
+      session: {
+        id: session.id,
+        title: session.title,
+        clientName: session.clientName,
+        projectName: session.projectName,
+        status: session.status,
+      },
+      submission: {
+        submittedAt: reviewerSubmission.submittedAt || null,
+        decisionCount: decisions.length,
+        approvedCount: decisions.filter((item) => item.liked).length,
+        rejectedCount: decisions.filter((item) => !item.liked).length,
+        annotationCount: annotations.length,
+      },
+      decisions,
+      annotations,
+    });
+  } catch (err) {
+    console.error('Reviewer session history error:', err);
+    return res.status(500).json({ error: 'Failed to load reviewer session history' });
   }
 });
 
@@ -437,7 +709,8 @@ app.get('/api/auth/me', async (req, res) => {
   try {
     const creator = await db.getItem('creators', auth.creator.sub, auth.creator.sub);
     if (!creator) return res.status(404).json({ error: 'Creator not found' });
-    res.json({ id: creator.id, email: creator.email, name: creator.name });
+    const capabilities = await getCreatorCapabilities(creator);
+    res.json({ id: creator.id, email: creator.email, name: creator.name, ...capabilities });
   } catch (err) {
     console.error('Auth me error:', err);
     res.status(500).json({ error: 'Failed to get profile' });
@@ -525,6 +798,9 @@ app.get('/api/sessions', async (req, res) => {
           reviewerPassword: undefined,
           _submissions: submissions,
           submissionCount: submissions.length,
+          likeCount: submissions.reduce((sum, sub) => sum + (sub.decisions || []).filter((item) => item.liked).length, 0),
+          dislikeCount: submissions.reduce((sum, sub) => sum + (sub.decisions || []).filter((item) => !item.liked).length, 0),
+          annotationCount: submissions.reduce((sum, sub) => sum + (sub.annotations || []).length, 0),
           postCount: new Set(
             images.map((img) => `${img.rowId || ''}-${Number(img.rowOrder) || 0}`).filter((key) => key !== '-0')
           ).size,
@@ -540,31 +816,6 @@ app.get('/api/sessions', async (req, res) => {
       })
     );
 
-    const knownContactsByProject = new Map();
-    const knownContactsByClient = new Map();
-
-    sessionsWithCounts.forEach((session) => {
-      const submissionContacts = (session._submissions || []).map((sub) => ({
-        reviewerName: sub.reviewerName,
-        reviewerEmail: sub.reviewerEmail,
-      }));
-
-      const known = mergeReviewerContacts(session.expectedReviewers || [], submissionContacts);
-      if (session.projectId) {
-        knownContactsByProject.set(
-          session.projectId,
-          mergeReviewerContacts(knownContactsByProject.get(session.projectId) || [], known)
-        );
-      }
-
-      if (session.clientId) {
-        knownContactsByClient.set(
-          session.clientId,
-          mergeReviewerContacts(knownContactsByClient.get(session.clientId) || [], known)
-        );
-      }
-    });
-
     const responseSessions = sessionsWithCounts.map((session) => {
       const submittedContacts = mergeReviewerContacts(
         (session._submissions || []).map((sub) => ({
@@ -574,9 +825,6 @@ app.get('/api/sessions', async (req, res) => {
       );
 
       const knownContacts = mergeReviewerContacts(
-        session.expectedReviewers || [],
-        knownContactsByProject.get(session.projectId) || [],
-        knownContactsByClient.get(session.clientId) || [],
         submittedContacts
       );
 
@@ -751,9 +999,18 @@ app.post('/api/sessions/:id/join', async (req, res) => {
     if (session.status !== 'active') return res.status(403).json({ error: 'This session is no longer accepting reviews' });
     if (session.deadline && new Date(session.deadline) < new Date()) return res.status(403).json({ error: 'This session has expired' });
 
+    const reviewerAccountUser = reviewerAccount.valid ? await getReviewerById(reviewerAccount.reviewer.sub) : null;
+    if (reviewerAccount.valid && !reviewerAccountUser) {
+      return res.status(404).json({ error: 'Reviewer account not found' });
+    }
+
     const { reviewerName, reviewerEmail, password } = req.body;
-    const cleanedName = String(reviewerName || '').trim();
-    const cleanedEmail = normalizeEmail(reviewerEmail);
+    const cleanedName = reviewerAccountUser
+      ? String(reviewerAccountUser.name || '').trim()
+      : String(reviewerName || '').trim();
+    const cleanedEmail = reviewerAccountUser
+      ? normalizeEmail(reviewerAccountUser.email)
+      : normalizeEmail(reviewerEmail);
     if (!cleanedName) return res.status(400).json({ error: 'Reviewer name is required' });
     if (!cleanedEmail || !/^\S+@\S+\.\S+$/.test(cleanedEmail)) {
       return res.status(400).json({ error: 'Valid reviewer email is required' });
@@ -881,40 +1138,122 @@ app.post('/api/sessions/:id/images', async (req, res) => {
   try {
     const session = await db.getItem('sessions', sessionId, auth.creator.sub);
     if (!session || session.creatorId !== auth.creator.sub) return res.status(404).json({ error: 'Session not found' });
-
-    const { images } = req.body;
-    if (!images || !images.length) return res.status(400).json({ error: 'No images provided' });
-
     const existingImages = await db.getImagesBySession(sessionId);
-    if (existingImages.length + images.length > 100) return res.status(400).json({ error: 'Maximum 100 images per session' });
-
+    const currentUsageBytes = await getCreatorStorageUsageBytes(auth.creator.sub);
     const uploaded = [];
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i];
-      const buffer = Buffer.from(img.data, 'base64');
-      if (buffer.length > 50 * 1024 * 1024) continue;
 
-      const { blobUrl, blobName } = await storage.uploadImage(sessionId, img.fileName, buffer, img.contentType || 'application/octet-stream');
-      const imageDoc = {
-        id: uuidv4(), sessionId, blobUrl, blobName,
-        fileName: img.fileName, contentType: img.contentType || 'application/octet-stream',
-        templateChannel: img.templateChannel || null,
-        templateText: img.templateText || '',
-        rowId: img.rowId || null,
-        rowOrder: Number(img.rowOrder) || existingImages.length + i + 1,
-        fileSize: buffer.length, order: existingImages.length + i,
-        uploadedAt: new Date().toISOString(),
-      };
-      await db.createItem('images', imageDoc);
-      uploaded.push(imageDoc);
+    if (req.is('multipart/form-data')) {
+      await new Promise((resolve, reject) => {
+        uploadMiddleware.single('file')(req, res, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+
+      const uploadedFile = req.file;
+      if (!uploadedFile) {
+        return res.status(400).json({ error: 'No images provided' });
+      }
+
+      const incomingSizeBytes = Number(uploadedFile.size) || 0;
+      if (currentUsageBytes + incomingSizeBytes > MAX_ACCOUNT_STORAGE_BYTES) {
+        await fs.promises.unlink(uploadedFile.path).catch(() => {});
+        return res.status(413).json({
+          error: 'You have exceeded the upload limit',
+          code: 'ACCOUNT_STORAGE_LIMIT_EXCEEDED',
+          maxBytes: MAX_ACCOUNT_STORAGE_BYTES,
+          usedBytes: currentUsageBytes,
+          remainingBytes: Math.max(0, MAX_ACCOUNT_STORAGE_BYTES - currentUsageBytes),
+        });
+      }
+
+      try {
+        const fileName = req.body.fileName || uploadedFile.originalname || 'upload';
+        const contentType = req.body.contentType || uploadedFile.mimetype || 'application/octet-stream';
+        const { blobUrl, blobName } = await storage.uploadImageFile(sessionId, fileName, uploadedFile.path, contentType);
+        const imageDoc = {
+          id: uuidv4(),
+          sessionId,
+          blobUrl,
+          blobName,
+          fileName,
+          contentType,
+          templateChannel: req.body.templateChannel || null,
+          templateText: req.body.templateText || '',
+          rowId: req.body.rowId || null,
+          rowOrder: Number(req.body.rowOrder) || existingImages.length + 1,
+          fileSize: incomingSizeBytes,
+          order: existingImages.length,
+          uploadedAt: new Date().toISOString(),
+        };
+        await db.createItem('images', imageDoc);
+        uploaded.push(imageDoc);
+      } finally {
+        await fs.promises.unlink(uploadedFile.path).catch(() => {});
+      }
+    } else {
+      const { images } = req.body;
+      if (!images || !images.length) return res.status(400).json({ error: 'No images provided' });
+
+      const incomingSizeBytes = images.reduce((sum, image) => {
+        const size = Buffer.byteLength(String(image?.data || ''), 'base64');
+        return sum + size;
+      }, 0);
+
+      if (currentUsageBytes + incomingSizeBytes > MAX_ACCOUNT_STORAGE_BYTES) {
+        return res.status(413).json({
+          error: 'You have exceeded the upload limit',
+          code: 'ACCOUNT_STORAGE_LIMIT_EXCEEDED',
+          maxBytes: MAX_ACCOUNT_STORAGE_BYTES,
+          usedBytes: currentUsageBytes,
+          remainingBytes: Math.max(0, MAX_ACCOUNT_STORAGE_BYTES - currentUsageBytes),
+        });
+      }
+
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        if (!img?.data || !img?.fileName) continue;
+        const buffer = Buffer.from(img.data, 'base64');
+        if (!buffer.length) continue;
+
+        const { blobUrl, blobName } = await storage.uploadImage(sessionId, img.fileName, buffer, img.contentType || 'application/octet-stream');
+        const imageDoc = {
+          id: uuidv4(), sessionId, blobUrl, blobName,
+          fileName: img.fileName, contentType: img.contentType || 'application/octet-stream',
+          templateChannel: img.templateChannel || null,
+          templateText: img.templateText || '',
+          rowId: img.rowId || null,
+          rowOrder: Number(img.rowOrder) || existingImages.length + i + 1,
+          fileSize: buffer.length, order: existingImages.length + i,
+          uploadedAt: new Date().toISOString(),
+        };
+        await db.createItem('images', imageDoc);
+        uploaded.push(imageDoc);
+      }
     }
 
     const totalImages = existingImages.length + uploaded.length;
     await db.updateItem('sessions', sessionId, auth.creator.sub, { imageCount: totalImages, updatedAt: new Date().toISOString() });
 
-    res.status(201).json({ uploaded: uploaded.length, total: totalImages, images: uploaded.map((img) => ({ id: img.id, fileName: img.fileName, order: img.order })) });
+    const updatedUsageBytes = currentUsageBytes + uploaded.reduce((sum, image) => sum + (Number(image.fileSize) || 0), 0);
+    res.status(201).json({
+      uploaded: uploaded.length,
+      total: totalImages,
+      images: uploaded.map((img) => ({ id: img.id, fileName: img.fileName, order: img.order })),
+      storage: {
+        usedBytes: updatedUsageBytes,
+        remainingBytes: Math.max(0, MAX_ACCOUNT_STORAGE_BYTES - updatedUsageBytes),
+        maxBytes: MAX_ACCOUNT_STORAGE_BYTES,
+      },
+    });
   } catch (err) {
     console.error('Image upload error:', err);
+    if (err && (err.code === 'LIMIT_FILE_SIZE' || err.status === 413)) {
+      return res.status(413).json({
+        error: 'You have exceeded the upload limit',
+        code: 'ACCOUNT_STORAGE_LIMIT_EXCEEDED',
+      });
+    }
     res.status(500).json({ error: 'Failed to upload images' });
   }
 });
@@ -944,7 +1283,16 @@ app.delete('/api/sessions/:id/images/:imageId', async (req, res) => {
       updatedAt: new Date().toISOString(),
     });
 
-    res.json({ message: 'Image deleted', remaining: remaining.length });
+    const usageBytes = await getCreatorStorageUsageBytes(auth.creator.sub);
+    res.json({
+      message: 'Image deleted',
+      remaining: remaining.length,
+      storage: {
+        usedBytes: usageBytes,
+        remainingBytes: Math.max(0, MAX_ACCOUNT_STORAGE_BYTES - usageBytes),
+        maxBytes: MAX_ACCOUNT_STORAGE_BYTES,
+      },
+    });
   } catch (err) {
     console.error('Image delete error:', err);
     res.status(500).json({ error: 'Failed to delete image' });

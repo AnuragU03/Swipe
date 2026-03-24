@@ -1,21 +1,28 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
 const SOCIAL_CHANNELS = ['LinkedIn', 'Instagram', 'YouTube'];
 
-const makeTemplateRows = (channel = 'LinkedIn') => [
-  { id: 1, channel, files: [], text: '' },
-];
+const makeRow = (channel = 'LinkedIn') => ({
+  id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+  channel,
+  text: '',
+  file: null,
+});
+
+const sanitizeFileName = (name = 'upload') => String(name).replace(/\s+/g, '_');
+const formatBytes = (bytes) => `${((bytes || 0) / (1024 * 1024)).toFixed(1)} MB`;
 
 export default function CreateSession() {
   const navigate = useNavigate();
+  const bulkInputRef = useRef(null);
+  const [uploadMode, setUploadMode] = useState('platform');
   const [selectedLayout, setSelectedLayout] = useState('LinkedIn');
-  const [clientName, setClientName] = useState('');
-  const [projectName, setProjectName] = useState('');
   const [clientChoice, setClientChoice] = useState('other');
   const [projectChoice, setProjectChoice] = useState('other');
-  const [title, setTitle] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [projectName, setProjectName] = useState('');
   const [deadline, setDeadline] = useState('');
   const [password, setPassword] = useState('');
   const [maxReviewers, setMaxReviewers] = useState('');
@@ -24,90 +31,57 @@ export default function CreateSession() {
   const [knownReviewerPick, setKnownReviewerPick] = useState('');
   const [newReviewerName, setNewReviewerName] = useState('');
   const [newReviewerEmail, setNewReviewerEmail] = useState('');
-  const [images, setImages] = useState([]);
-  const [templateRows, setTemplateRows] = useState(makeTemplateRows('LinkedIn'));
+  const [platformRows, setPlatformRows] = useState([makeRow('LinkedIn')]);
+  const [bulkFiles, setBulkFiles] = useState([]);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [createdSession, setCreatedSession] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [activePreviewRow, setActivePreviewRow] = useState(null);
-  const [activePreviewIndex, setActivePreviewIndex] = useState(0);
 
   useEffect(() => {
     let mounted = true;
-    api
-      .listSessions()
-      .then((data) => {
-        if (mounted) setHistorySessions(data.sessions || []);
-      })
-      .catch(() => {
-        if (mounted) setHistorySessions([]);
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const addReviewer = (reviewer) => {
-    const email = String(reviewer?.email || '').toLowerCase().trim();
-    const name = String(reviewer?.name || '').trim();
-    if (!email || !/^\S+@\S+\.\S+$/.test(email)) return;
-
-    setExpectedReviewers((prev) => {
-      if (prev.some((item) => item.email === email)) return prev;
-      return [...prev, { email, name: name || email.split('@')[0] }];
+    api.listSessions().then((data) => {
+      if (mounted) setHistorySessions(data.sessions || []);
+    }).catch(() => {
+      if (mounted) setHistorySessions([]);
     });
-  };
-
-  const removeReviewer = (email) => {
-    setExpectedReviewers((prev) => prev.filter((item) => item.email !== email));
-  };
+    return () => { mounted = false; };
+  }, []);
 
   const clientCatalog = useMemo(() => {
     const map = new Map();
     historySessions.forEach((session) => {
-      const clientId = session.clientId || `client-${(session.clientName || '').toLowerCase()}`;
-      const clientNameValue = String(session.clientName || '').trim();
-      if (!clientNameValue) return;
-
+      const normalizedClient = String(session.clientName || '').trim();
+      if (!normalizedClient) return;
+      const clientId = session.clientId || `client-${normalizedClient.toLowerCase()}`;
       if (!map.has(clientId)) {
-        map.set(clientId, {
-          id: clientId,
-          name: clientNameValue,
-          projects: new Map(),
-          reviewers: new Map(),
-        });
+        map.set(clientId, { id: clientId, name: normalizedClient, projects: new Map(), reviewers: new Map() });
       }
-
-      const current = map.get(clientId);
+      const client = map.get(clientId);
       if (session.projectId && session.projectName) {
-        current.projects.set(session.projectId, { id: session.projectId, name: session.projectName });
+        client.projects.set(session.projectId, { id: session.projectId, name: session.projectName });
       }
-
       (session.reviewerProgress || []).forEach((reviewer) => {
         const email = String(reviewer.email || '').toLowerCase().trim();
-        const name = String(reviewer.name || '').trim();
         if (!email) return;
-        current.reviewers.set(email, { email, name: name || email.split('@')[0] });
+        client.reviewers.set(email, {
+          email,
+          name: String(reviewer.name || '').trim() || email.split('@')[0],
+        });
       });
     });
-
-    return Array.from(map.values())
-      .map((client) => ({
-        ...client,
-        projects: Array.from(client.projects.values()).sort((a, b) => a.name.localeCompare(b.name)),
-        reviewers: Array.from(client.reviewers.values()).sort((a, b) => a.name.localeCompare(b.name)),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(map.values()).map((client) => ({
+      ...client,
+      projects: Array.from(client.projects.values()).sort((a, b) => a.name.localeCompare(b.name)),
+      reviewers: Array.from(client.reviewers.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    })).sort((a, b) => a.name.localeCompare(b.name));
   }, [historySessions]);
 
   const selectedClient = useMemo(
     () => clientCatalog.find((client) => client.id === clientChoice) || null,
     [clientCatalog, clientChoice]
   );
-
   const projectOptions = selectedClient?.projects || [];
   const knownReviewers = selectedClient?.reviewers || [];
 
@@ -121,142 +95,66 @@ export default function CreateSession() {
   useEffect(() => {
     if (projectChoice === 'other') return;
     const project = projectOptions.find((item) => item.id === projectChoice);
-    if (project) {
-      setProjectName(project.name);
-    }
+    if (project) setProjectName(project.name);
   }, [projectChoice, projectOptions]);
 
-  const readFileAsBase64 = (file) =>
-    new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const full = reader.result || '';
-        const base64 = typeof full === 'string' ? full.split(',')[1] : '';
-        resolve({
-          fileName: file.name,
-          data: base64,
-          contentType: file.type || 'application/octet-stream',
-          preview: full,
-        });
-      };
-      reader.readAsDataURL(file);
-    });
+  useEffect(() => {
+    setPlatformRows((prev) => prev.map((row) => ({ ...row, channel: selectedLayout })));
+  }, [selectedLayout]);
 
-  const totalUploaded = templateRows.reduce((sum, row) => sum + row.files.length, 0);
+  const addReviewer = (reviewer) => {
+    const email = String(reviewer?.email || '').toLowerCase().trim();
+    const name = String(reviewer?.name || '').trim();
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) return;
+    setExpectedReviewers((prev) => prev.some((item) => item.email === email) ? prev : [...prev, { email, name: name || email.split('@')[0] }]);
+  };
 
-  const syncImagesFromRows = (rows) => {
-    const flattened = rows.flatMap((row, rowIndex) =>
-      row.files.map((file, fileIndex) => ({
-        fileName: `${row.channel}_${rowIndex + 1}_${fileIndex + 1}_${file.fileName}`,
+  const readFileAsBase64 = (file) => new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const full = typeof reader.result === 'string' ? reader.result : '';
+      resolve({
+        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        fileName: file.name,
+        file,
+        data: full.split(',')[1] || '',
+        preview: full,
+        contentType: file.type || 'application/octet-stream',
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const currentUploads = useMemo(() => {
+    if (uploadMode === 'bulk') {
+      return bulkFiles.map((file, index) => ({
+        fileName: sanitizeFileName(file.fileName),
+        file: file.file,
         data: file.data,
         contentType: file.contentType,
-        templateChannel: row.channel,
-        templateText: row.text || '',
-        rowId: row.id,
-        rowOrder: rowIndex + 1,
-      }))
-    );
-    setImages(flattened);
-  };
-
-  const onRowFileChange = async (rowIndex, fileList) => {
-    const files = Array.from(fileList || []);
-    const converted = await Promise.all(files.map((file) => readFileAsBase64(file)));
-    const updated = templateRows.map((row, idx) =>
-      idx === rowIndex ? { ...row, files: converted } : row
-    );
-    setTemplateRows(updated);
-    syncImagesFromRows(updated);
-  };
-
-  const onRowTextChange = (rowIndex, value) => {
-    setTemplateRows((prev) => {
-      const updated = prev.map((row, idx) => (idx === rowIndex ? { ...row, text: value } : row));
-      syncImagesFromRows(updated);
-      return updated;
-    });
-  };
-
-  const onLayoutChange = (layout) => {
-    setSelectedLayout(layout);
-    const updated = templateRows.map((row) => ({ ...row, channel: layout }));
-    setTemplateRows(updated);
-    syncImagesFromRows(updated);
-  };
-
-  const addTemplateRow = () => {
-    const nextId = templateRows.length > 0 ? Math.max(...templateRows.map((row) => row.id)) + 1 : 1;
-    const updated = [...templateRows, { id: nextId, channel: selectedLayout, files: [], text: '' }];
-    setTemplateRows(updated);
-    syncImagesFromRows(updated);
-  };
-
-  const removeTemplateRow = (rowIndex) => {
-    if (templateRows.length <= 1) return;
-    const updated = templateRows.filter((_, idx) => idx !== rowIndex);
-    setTemplateRows(updated);
-    syncImagesFromRows(updated);
-  };
-
-  const openRowPreview = (rowIndex, imageIndex = 0) => {
-    setActivePreviewRow(rowIndex);
-    setActivePreviewIndex(imageIndex);
-  };
-
-  const closeRowPreview = () => {
-    setActivePreviewRow(null);
-    setActivePreviewIndex(0);
-  };
-
-  const currentPreviewRow =
-    activePreviewRow !== null && templateRows[activePreviewRow] ? templateRows[activePreviewRow] : null;
-
-  const handleCreate = async () => {
-    setError('');
-    setLoading(true);
-    try {
-      const sessionData = {
-        title,
-        clientName: clientName.trim(),
-        projectName: projectName.trim(),
-        expectedReviewers,
-      };
-      if (clientChoice !== 'other') sessionData.clientId = clientChoice;
-      if (projectChoice !== 'other') sessionData.projectId = projectChoice;
-      if (deadline) sessionData.deadline = new Date(deadline).toISOString();
-      if (password) sessionData.password = password;
-      if (maxReviewers) sessionData.maxReviewers = parseInt(maxReviewers, 10);
-
-      const { session } = await api.createSession(title, sessionData);
-
-      if (images.length > 0) {
-        await api.uploadImages(session.id, images.map((img) => ({
-          fileName: img.fileName,
-          data: img.data,
-          contentType: img.contentType,
-          templateChannel: img.templateChannel,
-          templateText: img.templateText,
-          rowId: img.rowId,
-          rowOrder: img.rowOrder,
-        })));
-      }
-
-      setCreatedSession(session);
-      setStep(3);
-    } catch (err) {
-      setError(err.message || 'Failed to create session');
-    } finally {
-      setLoading(false);
+        rowId: file.id,
+        rowOrder: index + 1,
+      }));
     }
-  };
+    return platformRows.filter((row) => row.file).map((row, index) => ({
+      fileName: `${row.channel}_${index + 1}_${sanitizeFileName(row.file.fileName)}`,
+      file: row.file.file,
+      data: row.file.data,
+      contentType: row.file.contentType,
+      templateChannel: row.channel,
+      templateText: row.text || '',
+      rowId: row.id,
+      rowOrder: index + 1,
+    }));
+  }, [bulkFiles, platformRows, uploadMode]);
 
+  const totalUploadBytes = currentUploads.reduce((sum, item) => sum + Math.floor((String(item.data || '').length * 3) / 4), 0);
   const reviewUrl = createdSession ? api.getPublicReviewUrl(createdSession.id) : '';
 
-  const renderPlatformPreview = (channel, row) => {
-    const media = row.files[0] || null;
-    const isVideo = media?.contentType?.startsWith('video/');
-
-    if (channel === 'Instagram') {
+  const renderPlatformPreview = (row) => {
+    const media = row.file;
+    const isVideo = String(media?.contentType || '').startsWith('video/');
+    if (row.channel === 'Instagram') {
       return (
         <div className="platform-card ig-card">
           <div className="ig-top">
@@ -268,87 +166,146 @@ export default function CreateSession() {
           </div>
           <div className="ig-media">
             {media ? (
-              isVideo ? <video src={media.preview} controls muted playsInline /> : <img src={media.preview} alt={media.fileName} />
+              isVideo ? (
+                <video src={media.preview} controls muted playsInline />
+              ) : (
+                <img src={media.preview} alt={media.fileName} />
+              )
             ) : (
               <div className="social-preview-media-empty">Upload media for Instagram preview</div>
             )}
           </div>
           <div className="ig-bottom">
-            <div className="ig-actions">♡  💬  ✈  ⌲</div>
-            <div className="ig-caption">{row.text || 'Write your Instagram caption here...'}</div>
-          </div>
-        </div>
-      );
-    }
-
-    if (channel === 'LinkedIn') {
-      return (
-        <div className="platform-card li-card">
-          <div className="li-top">
-            <div className="li-avatar" />
-            <div>
-              <div className="li-company">{clientName || 'Client Company'}</div>
-              <div className="li-meta">Project: {projectName || 'Project'} • just now</div>
+            <div className="ig-actions ig-actions-real">
+              <span>♡</span>
+              <span>💬</span>
+              <span>✈</span>
+              <span style={{ marginLeft: 'auto' }}>🔖</span>
+            </div>
+            <div className="ig-caption">
+              <strong>{projectName || 'project_account'}</strong>{' '}
+              {row.text || 'Captions will appear here.'}
             </div>
           </div>
-          <div className="li-copy">{row.text || 'Draft your LinkedIn post content for this campaign...'}</div>
-          <div className="li-media">
-            {media ? (
-              isVideo ? <video src={media.preview} controls muted playsInline /> : <img src={media.preview} alt={media.fileName} />
-            ) : (
-              <div className="social-preview-media-empty">Upload image/media for LinkedIn preview</div>
-            )}
-          </div>
-          <div className="li-actions">
-            <span>Like</span><span>Comment</span><span>Repost</span><span>Send</span>
-          </div>
         </div>
       );
     }
+    if (row.channel === 'LinkedIn') {
+      return <div className="platform-card li-card"><div className="li-top"><div className="li-avatar" /><div><div className="li-company">{clientName || 'Client Company'}</div><div className="li-meta">Sponsored | just now</div></div></div><div className="li-copy">{row.text || 'Captions will appear here.'}</div><div className="li-media">{media ? (isVideo ? <video src={media.preview} controls muted playsInline /> : <img src={media.preview} alt={media.fileName} />) : <div className="social-preview-media-empty">Upload image or video for LinkedIn preview</div>}</div><div className="li-actions"><span>Like</span><span>Comment</span><span>Repost</span><span>Send</span></div></div>;
+    }
+    return <div className="platform-card yt-card"><div className="yt-media">{media ? (isVideo ? <video src={media.preview} controls muted playsInline /> : <img src={media.preview} alt={media.fileName} />) : <div className="social-preview-media-empty">Upload media for YouTube preview</div>}</div><div className="yt-content"><div className="yt-title">{row.text || `${projectName || 'Project'} video title`}</div><div className="yt-meta">{clientName || 'Channel'} | Preview</div></div></div>;
+  };
 
-    return (
-      <div className="platform-card yt-card">
-        <div className="yt-media">
-          {media ? (
-            isVideo ? <video src={media.preview} controls muted playsInline /> : <img src={media.preview} alt={media.fileName} />
-          ) : (
-            <div className="social-preview-media-empty">Upload video for YouTube preview</div>
-          )}
-        </div>
-        <div className="yt-content">
-          <div className="yt-title">{row.text || `${projectName || 'Project'} - YouTube video title`}</div>
-          <div className="yt-meta">{clientName || 'Client Channel'} • Preview</div>
-        </div>
-      </div>
-    );
+  const handlePlatformFileChange = async (rowIndex, fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const converted = await Promise.all(files.map((file) => readFileAsBase64(file)));
+    setPlatformRows((prev) => {
+      const next = [...prev];
+      const currentRow = next[rowIndex];
+      if (!currentRow) return prev;
+      next[rowIndex] = { ...currentRow, file: converted[0] || null };
+      if (converted.length > 1) {
+        const extraRows = converted.slice(1).map((file) => ({
+          id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+          channel: currentRow.channel,
+          text: '',
+          file,
+        }));
+        next.splice(rowIndex + 1, 0, ...extraRows);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkFileChange = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const converted = await Promise.all(files.map((file) => readFileAsBase64(file)));
+    setBulkFiles((prev) => [...prev, ...converted]);
+  };
+
+  const removePlatformRow = (rowId) => {
+    setPlatformRows((prev) => {
+      if (prev.length === 1) {
+        return prev.map((row) => (row.id === rowId ? { ...row, file: null, text: '' } : row));
+      }
+      return prev.filter((row) => row.id !== rowId);
+    });
+  };
+
+  const removeBulkFile = (fileId) => {
+    setBulkFiles((prev) => prev.filter((file) => file.id !== fileId));
+  };
+
+  const addPlatformRow = () => {
+    setPlatformRows((prev) => [...prev, makeRow(selectedLayout)]);
+  };
+
+  const friendlyUploadError = (err) => {
+    const message = String(err?.message || err?.data?.error || '').toLowerCase();
+    if (
+      message.includes('invalid string length') ||
+      message.includes('payload too large') ||
+      message.includes('entity too large') ||
+      message.includes('request entity too large') ||
+      message.includes('upload limit')
+    ) {
+      return 'You have exceeded the upload limit';
+    }
+    return err?.message || 'Failed to create session';
+  };
+
+  const handleCreate = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const generatedTitle = `${clientName.trim()} - ${projectName.trim()}`;
+      const sessionData = {
+        clientName: clientName.trim(),
+        projectName: projectName.trim(),
+        expectedReviewers,
+      };
+      if (clientChoice !== 'other') sessionData.clientId = clientChoice;
+      if (projectChoice !== 'other') sessionData.projectId = projectChoice;
+      if (deadline) sessionData.deadline = new Date(deadline).toISOString();
+      if (password) sessionData.password = password;
+      if (maxReviewers) sessionData.maxReviewers = parseInt(maxReviewers, 10);
+      const { session } = await api.createSession(generatedTitle, sessionData);
+      for (const upload of currentUploads) {
+        await api.uploadImages(session.id, [upload]);
+      }
+      setCreatedSession(session);
+      setStep(3);
+    } catch (err) {
+      setError(friendlyUploadError(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const copyLink = async () => {
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(reviewUrl);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = reviewUrl;
-        ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
-        document.body.appendChild(ta);
-        ta.focus();
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      }
+      await navigator.clipboard.writeText(reviewUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      // If all else fails, select the text so user can manually copy
+    } catch {
       const input = document.querySelector('.share-link-url');
-      if (input) { input.focus(); input.select(); }
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
+  };
+
+  const openNativeDateTimePicker = (event) => {
+    if (typeof event.currentTarget.showPicker === 'function') {
+      event.currentTarget.showPicker();
     }
   };
 
   return (
     <div className="app-shell">
-      {/* Header */}
       <div className="header-bar">
         <button
           className="btn-ghost"
@@ -357,27 +314,17 @@ export default function CreateSession() {
             else navigate('/');
           }}
         >
-          ← Back
+          Back
         </button>
         <h2 style={{ fontSize: 18, fontWeight: 800 }}>
-          {step === 3 ? '🎉 Session Created!' : 'New Review Session'}
+          {step === 3 ? 'Session Created' : 'New Review Session'}
         </h2>
         <div style={{ width: 64 }} />
       </div>
 
-      {/* Step indicator */}
-      {step < 3 && (
-        <div className="step-indicator fade-in">
-          {[1, 2].map((s) => (
-            <div key={s} className={`step-dot${s <= step ? ' step-dot-active' : ''}`} />
-          ))}
-        </div>
-      )}
-
       <div style={{ maxWidth: 520, margin: '0 auto', width: '100%' }}>
-        {/* Step 1: Session Info */}
         {step === 1 && (
-          <div className="glass-panel fade-in" style={{ padding: 28 }}>
+          <div className="glass-panel fade-in" style={{ padding: 20 }}>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 24 }}>Session Details</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
@@ -385,8 +332,8 @@ export default function CreateSession() {
                 <select
                   className="field"
                   value={clientChoice}
-                  onChange={(e) => {
-                    const value = e.target.value;
+                  onChange={(event) => {
+                    const value = event.target.value;
                     setClientChoice(value);
                     if (value === 'other') {
                       setClientName('');
@@ -395,21 +342,20 @@ export default function CreateSession() {
                     }
                   }}
                 >
-                  <option value="other">Other</option>
+                  <option value="other">New Client</option>
                   {clientCatalog.map((client) => (
                     <option key={client.id} value={client.id}>
                       {client.name}
                     </option>
                   ))}
                 </select>
-
                 {clientChoice === 'other' && (
                   <input
                     className="field"
                     style={{ marginTop: 10 }}
                     placeholder="e.g., Panda Media"
                     value={clientName}
-                    onChange={(e) => setClientName(e.target.value)}
+                    onChange={(event) => setClientName(event.target.value)}
                   />
                 )}
               </div>
@@ -419,68 +365,94 @@ export default function CreateSession() {
                 <select
                   className="field"
                   value={projectChoice}
-                  onChange={(e) => {
-                    const value = e.target.value;
+                  onChange={(event) => {
+                    const value = event.target.value;
                     setProjectChoice(value);
-                    if (value === 'other') {
-                      setProjectName('');
-                    }
+                    if (value === 'other') setProjectName('');
                   }}
                 >
-                  <option value="other">Other</option>
+                  <option value="other">New Project</option>
                   {projectOptions.map((project) => (
                     <option key={project.id} value={project.id}>
                       {project.name}
                     </option>
                   ))}
                 </select>
-
                 {projectChoice === 'other' && (
                   <input
                     className="field"
                     style={{ marginTop: 10 }}
                     placeholder="e.g., Spring Social Campaign"
                     value={projectName}
-                    onChange={(e) => setProjectName(e.target.value)}
+                    onChange={(event) => setProjectName(event.target.value)}
                   />
                 )}
               </div>
-
               <div>
-                <label className="field-label">Session Title *</label>
-                <input
-                  className="field"
-                  placeholder="e.g., Sprint 12 Design Review"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="field-label">Platform Layout *</label>
-                <div className="layout-switch" style={{ marginTop: 8 }}>
-                  {SOCIAL_CHANNELS.map((channel) => (
+                <label className="field-label">Upload Mode *</label>
+                <div className="layout-switch" style={{ marginTop: 8, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+                  {['platform', 'bulk'].map((mode) => (
                     <button
-                      key={channel}
+                      key={mode}
                       type="button"
-                      onClick={() => onLayoutChange(channel)}
-                      className={`layout-switch-btn ${selectedLayout === channel ? 'layout-switch-btn-active' : ''}`}
+                      onClick={() => setUploadMode(mode)}
+                      className={`layout-switch-btn ${uploadMode === mode ? 'layout-switch-btn-active' : ''}`}
                     >
-                      {channel}
+                      {mode === 'platform' ? 'Platform Upload' : 'Bulk Upload'}
                     </button>
                   ))}
                 </div>
               </div>
+
+              {uploadMode === 'platform' && (
+                <div>
+                  <label className="field-label">Platform Layout *</label>
+                  <div className="layout-switch" style={{ marginTop: 8 }}>
+                    {SOCIAL_CHANNELS.map((channel) => (
+                      <button
+                        key={channel}
+                        type="button"
+                        onClick={() => setSelectedLayout(channel)}
+                        className={`layout-switch-btn ${selectedLayout === channel ? 'layout-switch-btn-active' : ''}`}
+                      >
+                        {channel}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="field-label">Deadline (optional)</label>
-                <input
-                  className="field"
-                  type="datetime-local"
-                  value={deadline}
-                  onChange={(e) => setDeadline(e.target.value)}
-                  style={{ colorScheme: 'dark' }}
-                />
+                <div className="datetime-field-wrap">
+                  <input
+                    className="field field-datetime"
+                    type="datetime-local"
+                    value={deadline}
+                    onChange={(event) => setDeadline(event.target.value)}
+                    onClick={openNativeDateTimePicker}
+                    onFocus={openNativeDateTimePicker}
+                  />
+                  <button
+                    type="button"
+                    className="datetime-trigger"
+                    onClick={(event) => {
+                      const input = event.currentTarget.previousElementSibling;
+                      if (input) {
+                        input.focus();
+                        if (typeof input.showPicker === 'function') input.showPicker();
+                      }
+                    }}
+                    aria-label="Open deadline picker"
+                  >
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                      <rect x="3" y="5" width="18" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                      <path d="M7 3v4M17 3v4M3 9h18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
               </div>
+
               <div>
                 <label className="field-label">Password Protection (optional)</label>
                 <input
@@ -488,18 +460,19 @@ export default function CreateSession() {
                   type="text"
                   placeholder="Leave blank for no password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(event) => setPassword(event.target.value)}
                 />
               </div>
+
               <div>
                 <label className="field-label">Max Reviewers (optional)</label>
                 <input
                   className="field"
                   type="number"
-                  placeholder="Unlimited"
                   min="1"
+                  placeholder="Unlimited"
                   value={maxReviewers}
-                  onChange={(e) => setMaxReviewers(e.target.value)}
+                  onChange={(event) => setMaxReviewers(event.target.value)}
                 />
               </div>
 
@@ -509,7 +482,7 @@ export default function CreateSession() {
                   <select
                     className="field"
                     value={knownReviewerPick}
-                    onChange={(e) => setKnownReviewerPick(e.target.value)}
+                    onChange={(event) => setKnownReviewerPick(event.target.value)}
                   >
                     <option value="">Select previous reviewer</option>
                     {knownReviewers.map((reviewer) => (
@@ -538,14 +511,14 @@ export default function CreateSession() {
                     className="field"
                     placeholder="Reviewer name"
                     value={newReviewerName}
-                    onChange={(e) => setNewReviewerName(e.target.value)}
+                    onChange={(event) => setNewReviewerName(event.target.value)}
                   />
                   <input
                     className="field"
                     type="email"
                     placeholder="reviewer@email.com"
                     value={newReviewerEmail}
-                    onChange={(e) => setNewReviewerEmail(e.target.value)}
+                    onChange={(event) => setNewReviewerEmail(event.target.value)}
                   />
                   <button
                     type="button"
@@ -569,10 +542,9 @@ export default function CreateSession() {
                         type="button"
                         className="btn-ghost"
                         style={{ width: 'auto', padding: '8px 10px', fontSize: 12 }}
-                        onClick={() => removeReviewer(reviewer.email)}
-                        title="Remove reviewer"
+                        onClick={() => setExpectedReviewers((prev) => prev.filter((item) => item.email !== reviewer.email))}
                       >
-                        {reviewer.name} · {reviewer.email} ✕
+                        {reviewer.name} | {reviewer.email} x
                       </button>
                     ))}
                   </div>
@@ -581,238 +553,111 @@ export default function CreateSession() {
 
               <button
                 className="btn-accent"
-                disabled={!clientName.trim() || !projectName.trim() || !title.trim()}
+                disabled={!clientName.trim() || !projectName.trim()}
                 onClick={() => setStep(2)}
                 style={{ marginTop: 8 }}
               >
-                Next: Template Upload →
+                {uploadMode === 'bulk' ? 'Next: Bulk Upload' : 'Next: Platform Upload'}
               </button>
             </div>
           </div>
         )}
 
-        {/* Step 2: Template Upload */}
         {step === 2 && (
           <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            <div className="glass-panel" style={{ padding: 28 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Template Upload</h3>
+            <div className="glass-panel" style={{ padding: 20 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>
+                {uploadMode === 'bulk' ? 'Bulk Upload' : 'Platform Upload'}
+              </h3>
+              <div className="template-total-box">TOTAL UPLOAD: {currentUploads.length}</div>
 
-              <div className="template-total-box">
-                TOTAL UPLOAD: {totalUploaded}
-              </div>
-
-              <div style={{ marginBottom: 14, color: 'var(--sub)', fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Layout: {selectedLayout}
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {templateRows.map((row, rowIndex) => (
-                  <div key={row.id} className="template-preview-card">
-                    <div className="template-row-grid">
-                      <div className="template-row-index">{rowIndex + 1}</div>
-
-                      <label className="template-upload-box">
-                        <input
-                          type="file"
-                          accept={selectedLayout === 'YouTube' ? 'video/*,image/*' : 'image/*'}
-                          multiple
-                          style={{ display: 'none' }}
-                          onChange={(e) => onRowFileChange(rowIndex, e.target.files)}
-                        />
-                        {row.files.length > 0 ? `${row.files.length} FILE` : 'UPLOAD'}
-                      </label>
-
-                      <textarea
-                        className="template-text-box"
-                        placeholder={selectedLayout === 'YouTube' ? 'VIDEO CAPTION / TEXT' : 'POST TEXT'}
-                        value={row.text}
-                        onChange={(e) => onRowTextChange(rowIndex, e.target.value)}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{ fontSize: 12, color: 'var(--sub)', marginBottom: 8, fontWeight: 700, letterSpacing: '0.08em' }}>
-                        PREVIEW
-                      </div>
-                      <div className="template-row-preview-grid">
-                        {row.files.length > 0 ? (
-                          row.files.map((file, fileIndex) => (
-                            <button
-                              type="button"
-                              key={`${row.id}-${file.fileName}-${fileIndex}`}
-                              className="template-preview-item template-preview-btn"
-                              onClick={() => openRowPreview(rowIndex, fileIndex)}
-                            >
-                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sub)', marginBottom: 6 }}>
-                                {selectedLayout.toUpperCase()} PREVIEW {fileIndex + 1}
-                              </div>
-                              {renderPlatformPreview(selectedLayout, {
-                                ...row,
-                                files: [file],
-                              })}
-                            </button>
-                          ))
-                        ) : (
-                          <div className="template-preview-item" style={{ color: 'var(--sub)', fontSize: 12 }}>
-                            Upload media to see preview.
+              {uploadMode === 'bulk' ? (
+                <>
+                  <div className="bulk-storage-box">
+                    <div className="bulk-storage-row"><span>This upload</span><strong>{formatBytes(totalUploadBytes)}</strong></div>
+                    <div className="bulk-storage-row"><span>Account limit</span><strong>500.0 MB</strong></div>
+                  </div>
+                  <button type="button" className="bulk-dropzone" onClick={() => bulkInputRef.current?.click()}>
+                    <input ref={bulkInputRef} type="file" accept="image/*,video/*" multiple hidden onChange={(event) => handleBulkFileChange(event.target.files)} />
+                    <div className="bulk-dropzone-icon">+</div>
+                    <div className="bulk-dropzone-title">Drag and drop files here</div>
+                    <div className="bulk-dropzone-copy">Upload multiple files with no captions</div>
+                  </button>
+                  <div className="bulk-preview-grid">
+                    {bulkFiles.length === 0 ? (
+                      <div className="template-preview-item" style={{ color: 'var(--sub)', fontSize: 12 }}>Upload files to see previews.</div>
+                    ) : (
+                      bulkFiles.map((file, index) => (
+                        <div key={file.id} className="bulk-preview-card template-preview-shell">
+                          <button type="button" className="template-preview-remove" onClick={() => removeBulkFile(file.id)}>x</button>
+                          <div className="bulk-preview-media">
+                            {String(file.contentType || '').startsWith('video/') ? <video src={file.preview} controls muted playsInline /> : <img src={file.preview} alt={file.fileName} />}
                           </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {templateRows.length > 1 && (
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        onClick={() => removeTemplateRow(rowIndex)}
-                        style={{ alignSelf: 'flex-end', width: 'auto', padding: '8px 10px', fontSize: 12 }}
-                      >
-                        Remove Row
-                      </button>
+                          <div className="bulk-preview-meta">Upload {index + 1}</div>
+                        </div>
+                      ))
                     )}
                   </div>
-                ))}
-              </div>
-
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={addTemplateRow}
-                style={{ marginTop: 14 }}
-              >
-                + Add Upload Row
-              </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {platformRows.map((row, rowIndex) => (
+                      <div key={row.id} className="template-preview-card">
+                        <div className="template-row-grid">
+                          <div className="template-row-index">{rowIndex + 1}</div>
+                          <label className="template-upload-box">
+                            <input type="file" accept={selectedLayout === 'YouTube' ? 'video/*,image/*' : 'image/*,video/*'} multiple hidden onChange={(event) => handlePlatformFileChange(rowIndex, event.target.files)} />
+                            {row.file ? 'Replace' : 'Upload'}
+                          </label>
+                          <textarea
+                            className="template-text-box"
+                            placeholder="Captions"
+                            value={row.text}
+                            onChange={(event) => setPlatformRows((prev) => prev.map((item) => (item.id === row.id ? { ...item, text: event.target.value } : item)))}
+                          />
+                        </div>
+                        <div className="template-row-preview-grid">
+                          {row.file ? (
+                            <div className="template-preview-item template-preview-shell">
+                              <button type="button" className="template-preview-remove" onClick={() => removePlatformRow(row.id)}>x</button>
+                              <div className="template-preview-btn" style={{ cursor: 'default' }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sub)', marginBottom: 6 }}>Upload {rowIndex + 1}</div>
+                                {renderPlatformPreview(row)}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="template-preview-item" style={{ color: 'var(--sub)', fontSize: 12 }}>Upload media to see preview.</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" className="btn-secondary" onClick={addPlatformRow} style={{ marginTop: 14, width: '100%' }}>+ Add Upload Row</button>
+                </>
+              )}
             </div>
 
             {error && <div className="error-box">{error}</div>}
 
-            <button
-              className="btn-accent"
-              disabled={loading || images.length === 0}
-              onClick={handleCreate}
-            >
-              {loading ? 'Creating Session…' : `Create Session with ${images.length} Upload${images.length !== 1 ? 's' : ''}`}
+            <button className="btn-accent" disabled={loading || currentUploads.length === 0} onClick={handleCreate}>
+              {loading ? 'Creating session...' : `Create Session with ${currentUploads.length} Upload${currentUploads.length !== 1 ? 's' : ''}`}
             </button>
           </div>
         )}
 
-        {/* Step 3: Success */}
         {step === 3 && createdSession && (
           <div className="fade-in" style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center' }}>
-            <div className="complete-emoji">🎉</div>
-
+            <div className="complete-icon-badge" aria-hidden="true"><span className="complete-icon-glyph">OK</span></div>
             <h3 style={{ fontSize: 22, fontWeight: 800 }}>{createdSession.title}</h3>
-            <p style={{ color: 'var(--sub)', fontSize: 14 }}>
-              Share this link with your reviewers:
-            </p>
-
+            <p style={{ color: 'var(--sub)', fontSize: 14 }}>Share this link with your reviewers:</p>
             <div className="share-link-box" style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
-              <input
-                className="share-link-url"
-                type="text"
-                readOnly
-                value={reviewUrl}
-                onFocus={(e) => e.target.select()}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  wordBreak: 'normal',
-                  overflowWrap: 'normal',
-                }}
-              />
-              <button onClick={copyLink} style={{ flexShrink: 0 }}>{copied ? '\u2713 Copied' : 'Copy Link'}</button>
+              <input className="share-link-url" type="text" readOnly value={reviewUrl} onFocus={(event) => event.target.select()} style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} />
+              <button onClick={copyLink} style={{ flexShrink: 0 }}>{copied ? 'Copied' : 'Copy Link'}</button>
             </div>
-
             <div style={{ display: 'flex', gap: 12, width: '100%' }}>
-              <button
-                className="btn-ghost"
-                onClick={() => navigate(`/sessions/${createdSession.id}`)}
-                style={{ flex: 1, padding: '14px 0' }}
-              >
-                View Results
-              </button>
-              <button
-                className="btn-accent"
-                onClick={() => navigate('/')}
-                style={{ flex: 1 }}
-              >
-                Dashboard
-              </button>
-            </div>
-          </div>
-        )}
-
-        {currentPreviewRow && (
-          <div className="template-preview-modal-overlay" onClick={closeRowPreview}>
-            <div className="template-preview-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="template-preview-modal-header">
-                <div style={{ fontSize: 13, fontWeight: 700 }}>
-                  {currentPreviewRow.channel} · Row {currentPreviewRow.id}
-                </div>
-                <button type="button" className="btn-ghost" style={{ width: 'auto', padding: '6px 10px', fontSize: 12 }} onClick={closeRowPreview}>
-                  Close
-                </button>
-              </div>
-
-              <div className="template-preview-modal-body">
-                {currentPreviewRow.files.length > 0 &&
-                  renderPlatformPreview(currentPreviewRow.channel, {
-                    ...currentPreviewRow,
-                    files: [currentPreviewRow.files[activePreviewIndex]],
-                  })}
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  style={{ width: 'auto', padding: '8px 10px', fontSize: 12 }}
-                  onClick={() =>
-                    setActivePreviewIndex((prev) =>
-                      Math.max(0, prev - 1)
-                    )
-                  }
-                  disabled={activePreviewIndex <= 0}
-                >
-                  ← Previous
-                </button>
-                <div style={{ fontSize: 12, color: 'var(--sub)' }}>
-                  {activePreviewIndex + 1} / {currentPreviewRow.files.length}
-                </div>
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  style={{ width: 'auto', padding: '8px 10px', fontSize: 12 }}
-                  onClick={() =>
-                    setActivePreviewIndex((prev) =>
-                      Math.min(currentPreviewRow.files.length - 1, prev + 1)
-                    )
-                  }
-                  disabled={activePreviewIndex >= currentPreviewRow.files.length - 1}
-                >
-                  Next →
-                </button>
-              </div>
-
-              <div className="template-preview-modal-strip">
-                {currentPreviewRow.files.map((file, index) => (
-                  <button
-                    type="button"
-                    key={`${file.fileName}-${index}`}
-                    className={`template-preview-thumb ${index === activePreviewIndex ? 'template-preview-thumb-active' : ''}`}
-                    onClick={() => setActivePreviewIndex(index)}
-                  >
-                    {file.contentType?.startsWith('video/') ? (
-                      <video src={file.preview} muted playsInline />
-                    ) : (
-                      <img src={file.preview} alt={file.fileName} />
-                    )}
-                  </button>
-                ))}
-              </div>
+              <button className="btn-ghost" onClick={() => navigate(`/sessions/${createdSession.id}`)} style={{ flex: 1, padding: '14px 0' }}>View Results</button>
+              <button className="btn-accent" onClick={() => navigate('/')} style={{ flex: 1 }}>Dashboard</button>
             </div>
           </div>
         )}
