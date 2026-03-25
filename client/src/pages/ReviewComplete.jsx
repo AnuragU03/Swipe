@@ -27,7 +27,7 @@ export default function ReviewComplete() {
   return (
     <div className="app-shell complete-screen">
       <div className="complete-icon-badge fade-in" aria-hidden="true">
-        <span className="complete-icon-glyph">✓</span>
+        <span className="complete-icon-glyph" />
       </div>
 
       <div className="fade-in">

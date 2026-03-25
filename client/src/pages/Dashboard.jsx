@@ -27,6 +27,10 @@ function isVideoAsset(image) {
   return source.startsWith('video/') || /\.(mp4|mov|avi|webm|mkv)$/i.test(source);
 }
 
+function reviewerKey(reviewer) {
+  return normalize(reviewer?.email, normalize(reviewer?.name, 'reviewer'));
+}
+
 export default function Dashboard() {
   const { creator, logout } = useAuth();
   const navigate = useNavigate();
@@ -155,14 +159,6 @@ export default function Dashboard() {
           <RoleFlowToggle active="sender" />
         </div>
 
-        <button
-          className="btn-accent anim-fade-up"
-          onClick={() => navigate('/sessions/new')}
-          style={{ marginBottom: 10 }}
-        >
-          + New Review Session
-        </button>
-
         <div className="anim-fade-up" style={{ marginBottom: 12 }}>
           <label className="field-label">Select Client</label>
           <select
@@ -179,6 +175,14 @@ export default function Dashboard() {
             ))}
           </select>
         </div>
+
+        <button
+          className="btn-accent anim-fade-up"
+          onClick={() => navigate('/sessions/new')}
+          style={{ marginBottom: 12 }}
+        >
+          + New Review Session
+        </button>
 
         <div className="stats-grid-3 anim-fade-up" style={{ marginBottom: 14 }}>
           <div className="stat-card">
@@ -223,6 +227,7 @@ export default function Dashboard() {
                 <div key={client.clientId} className="dashboard-client-card fade-in">
                   <div className="dashboard-card-header" style={{ marginBottom: 10 }}>
                     <div>
+                      <div className="dashboard-entity-label">Client</div>
                       <div className="dashboard-client-title">{client.clientName}</div>
                       <div className="dashboard-client-meta">
                         {client.projects.length} project{client.projects.length !== 1 ? 's' : ''}
@@ -247,18 +252,45 @@ export default function Dashboard() {
                       const postCount = project.sessions.reduce((sum, item) => sum + (Number(item.postCount) || 0), 0);
                       const fallbackImages = project.sessions.reduce((sum, item) => sum + (Number(item.imageCount) || 0), 0);
                       const imageCount = projectImages.length > 0 ? projectImages.length : fallbackImages;
-                      const reviewerNames = Array.from(
-                        new Set(
-                          project.sessions
-                            .flatMap((item) => item.reviewerProgress || [])
-                            .filter((reviewer) => String(reviewer.status || '').toLowerCase() === 'done')
-                            .map((reviewer) => normalize(reviewer.name || reviewer.email, 'Reviewer'))
-                        )
-                      );
-                      const visibleReviewerNames = reviewerNames.slice(0, 3);
-                      const extraReviewerCount = Math.max(0, reviewerNames.length - visibleReviewerNames.length);
-                      const totalApprovals = project.sessions.reduce((sum, item) => sum + (Number(item.likeCount) || 0), 0);
-                      const totalRejections = project.sessions.reduce((sum, item) => sum + (Number(item.dislikeCount) || 0), 0);
+                      const reviewerSummaries = Array.from(
+                        project.sessions
+                          .flatMap((item) => item.reviewerProgress || [])
+                          .filter((reviewer) => String(reviewer.status || '').toLowerCase() === 'done')
+                          .reduce((acc, reviewer) => {
+                            const key = reviewerKey(reviewer);
+                            const existing = acc.get(key) || {
+                              name: normalize(reviewer.name || reviewer.email, 'Reviewer'),
+                              email: normalize(reviewer.email, ''),
+                              likeCount: 0,
+                              dislikeCount: 0,
+                              annotationCount: 0,
+                              submissionCount: 0,
+                              submittedAt: null,
+                            };
+
+                            existing.likeCount += Number(reviewer.likeCount) || 0;
+                            existing.dislikeCount += Number(reviewer.dislikeCount) || 0;
+                            existing.annotationCount += Number(reviewer.annotationCount) || 0;
+                            existing.submissionCount += Number(reviewer.submissionCount) || 0;
+
+                            const reviewerTime = new Date(reviewer.submittedAt || 0).getTime();
+                            const existingTime = new Date(existing.submittedAt || 0).getTime();
+                            if (reviewerTime && reviewerTime >= existingTime) {
+                              existing.submittedAt = reviewer.submittedAt;
+                            }
+
+                            acc.set(key, existing);
+                            return acc;
+                          }, new Map())
+                          .values()
+                      ).sort((left, right) => {
+                        const rightTime = new Date(right.submittedAt || 0).getTime();
+                        const leftTime = new Date(left.submittedAt || 0).getTime();
+                        if (rightTime !== leftTime) return rightTime - leftTime;
+                        return left.name.localeCompare(right.name);
+                      });
+                      const visibleReviewerSummaries = reviewerSummaries.slice(0, 3);
+                      const extraReviewerCount = Math.max(0, reviewerSummaries.length - visibleReviewerSummaries.length);
                       const totalComments = project.sessions.reduce((sum, item) => sum + (Number(item.annotationCount) || 0), 0);
                       const lastActivity = project.sessions
                         .map((item) => item.updatedAt || item.createdAt)
@@ -298,7 +330,10 @@ export default function Dashboard() {
                             </div>
 
                             <div className="dashboard-session-topline">
-                              <div className="dashboard-project-title">{project.projectName}</div>
+                              <div>
+                                <div className="dashboard-entity-label dashboard-entity-label-project">Project</div>
+                                <div className="dashboard-project-title">{project.projectName}</div>
+                              </div>
                               <div>{renderStatus(projectStatus)}</div>
                             </div>
 
@@ -308,11 +343,21 @@ export default function Dashboard() {
 
                             <div className="dashboard-reviewer-row dashboard-reviewer-row-restored">
                               <div className="dashboard-reviewer-list">
-                                {visibleReviewerNames.length > 0 ? (
+                                {visibleReviewerSummaries.length > 0 ? (
                                   <>
-                                    {visibleReviewerNames.map((name) => (
-                                      <div key={name} className="dashboard-reviewer-name dashboard-reviewer-name-stack">
-                                        {name}
+                                    {visibleReviewerSummaries.map((reviewer) => (
+                                      <div key={reviewerKey(reviewer)} className="dashboard-reviewer-entry">
+                                        <div className="dashboard-reviewer-name dashboard-reviewer-name-stack">
+                                          {reviewer.name}
+                                        </div>
+                                        <div className="dashboard-reviewer-metrics dashboard-reviewer-metrics-stack">
+                                          <span className="metric-chip metric-chip-like">
+                                            {Math.max(0, reviewer.likeCount)}
+                                          </span>
+                                          <span className="metric-chip metric-chip-dislike">
+                                            {Math.max(0, reviewer.dislikeCount)}
+                                          </span>
+                                        </div>
                                       </div>
                                     ))}
                                     {extraReviewerCount > 0 && (
@@ -325,15 +370,11 @@ export default function Dashboard() {
                                   </div>
                                 )}
                               </div>
-                              <div className="dashboard-reviewer-metrics">
-                                <span>👍 {Math.max(0, totalApprovals)}</span>
-                                <span>👎 {Math.max(0, totalRejections)}</span>
-                              </div>
                             </div>
 
                             <div className="dashboard-project-foot">
                               <div>{totalComments} comment{totalComments !== 1 ? 's' : ''}</div>
-                              <div>{formatRelativeTime(lastActivity)}</div>
+                              <div className="dashboard-project-time">{formatRelativeTime(lastActivity)}</div>
                             </div>
                           </div>
                         </div>

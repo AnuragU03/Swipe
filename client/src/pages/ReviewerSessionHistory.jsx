@@ -8,10 +8,31 @@ function openAsset(url) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-function HistoryThumb({ url, alt }) {
+function isVideoAsset(item) {
+  const source = String(item?.contentType || item?.fileName || item?.url || '').toLowerCase();
+  return source.startsWith('video/') || /\.(mp4|mov|avi|webm|mkv)(\?|$)/i.test(source);
+}
+
+function renderStatus(status) {
+  const normalized = String(status || 'draft').toLowerCase();
+  const cls =
+    normalized === 'active'
+      ? 'badge-active'
+      : normalized === 'closed'
+        ? 'badge-closed'
+        : 'badge-draft';
+  return <span className={`badge ${cls}`}>{normalized}</span>;
+}
+
+function HistoryThumb({ item, alt }) {
+  const url = item?.url || '';
   return (
     <div className="history-thumb">
-      {url ? <img src={url} alt={alt} /> : <span className="history-thumb-fallback">F</span>}
+      {url ? (
+        isVideoAsset(item) ? <video src={url} muted playsInline preload="metadata" /> : <img src={url} alt={alt} />
+      ) : (
+        <span className="history-thumb-fallback">F</span>
+      )}
     </div>
   );
 }
@@ -100,26 +121,29 @@ export default function ReviewerSessionHistory() {
   return (
     <div className="app-shell">
       <div className="page" style={{ paddingTop: 12 }}>
-        <div className="header-bar" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <BackButton />
-            <div>
+        <div className="header-bar history-header-bar" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+            <div className="results-header-main-left">
+              <BackButton />
               <div className="logo">
                 Creative<span>Swipe</span>
               </div>
-              <div style={{ fontSize: 13, color: 'var(--sub)', marginTop: 4 }}>
-                My Review History
-              </div>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--sub)' }}>
+              My Review History
             </div>
           </div>
-          <button className="btn-ghost" onClick={() => navigate('/reviewer')}>Dashboard</button>
         </div>
 
-        <div style={{ fontSize: 13, color: 'var(--sub)', marginBottom: 10 }}>
-          <strong style={{ color: 'var(--text)' }}>{history?.session?.clientName || 'Client'}</strong> | {history?.session?.projectName || 'Project'}
+        <div className="history-session-meta">
+          <div className="dashboard-entity-label">Client</div>
+          <div className="results-client-line results-client-line-with-status">
+            <div className="history-session-client">{history?.session?.clientName || 'Client'}</div>
+            {history?.session?.status ? renderStatus(history.session.status) : null}
+          </div>
+          <div className="dashboard-entity-label dashboard-entity-label-project" style={{ marginTop: 10 }}>Project</div>
+          <div className="history-session-project">{history?.session?.projectName || history?.session?.title || 'Project'}</div>
         </div>
-
-        <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 12 }}>{history?.session?.title || 'Review Session'}</h2>
 
         <div className="stats-grid-3" style={{ marginBottom: 12 }}>
           <div className="stat-card">
@@ -150,7 +174,7 @@ export default function ReviewerSessionHistory() {
             decisions.map((item) => (
               <div key={`${item.imageId}-${item.liked}`} className="history-card">
                 <div className="history-card-main">
-                  <HistoryThumb url={item.url} alt={item.fileName || item.imageId} />
+                  <HistoryThumb item={item} alt={item.fileName || item.imageId} />
                   <div className="history-card-copy">
                     <div className="history-card-title">{item.fileName || item.imageId}</div>
                     <div className="history-card-meta">
@@ -182,7 +206,7 @@ export default function ReviewerSessionHistory() {
               <div key={group.imageId} className="history-comment-card">
                 <div className="history-card">
                   <div className="history-card-main">
-                    <HistoryThumb url={group.url} alt={group.fileName || group.imageId} />
+                    <HistoryThumb item={group} alt={group.fileName || group.imageId} />
                     <div className="history-card-copy">
                       <div className="history-card-title">{group.fileName || group.imageId}</div>
                       <div className="history-card-meta">

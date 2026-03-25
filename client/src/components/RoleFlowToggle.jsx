@@ -5,9 +5,10 @@ import { useAuth } from '../context/AuthContext';
 export default function RoleFlowToggle({ active = 'receiver' }) {
   const navigate = useNavigate();
   const {
-    hasReceiverAccess,
     creator,
     reviewer,
+    hasReceiverAccess,
+    hasSenderAccess,
     switchToReceiver,
     switchToSender,
   } = useAuth();
@@ -15,6 +16,7 @@ export default function RoleFlowToggle({ active = 'receiver' }) {
 
   const handleSender = async () => {
     if (active === 'sender') return;
+    if (!hasSenderAccess) return;
     setSwitching('sender');
     try {
       const result = await switchToSender();
@@ -37,6 +39,7 @@ export default function RoleFlowToggle({ active = 'receiver' }) {
 
   const handleReceiver = async () => {
     if (active === 'receiver') return;
+    if (!hasReceiverAccess) return;
     setSwitching('receiver');
     try {
       const result = await switchToReceiver({ force: true });
@@ -57,17 +60,22 @@ export default function RoleFlowToggle({ active = 'receiver' }) {
     }
   };
 
+  const showSender = active === 'sender' || hasSenderAccess;
+  const showReceiver = active === 'receiver' || hasReceiverAccess;
+
   return (
     <div className="role-flow-toggle">
-      <button
-        type="button"
-        className={`role-flow-btn ${active === 'sender' ? 'role-flow-btn-active' : ''}`}
-        onClick={handleSender}
-        disabled={switching === 'sender'}
-      >
-        {switching === 'sender' ? 'Opening...' : 'Sender'}
-      </button>
-      {hasReceiverAccess && (
+      {showSender && (
+        <button
+          type="button"
+          className={`role-flow-btn ${active === 'sender' ? 'role-flow-btn-active' : ''}`}
+          onClick={handleSender}
+          disabled={switching === 'sender'}
+        >
+          {switching === 'sender' ? 'Opening...' : 'Sender'}
+        </button>
+      )}
+      {showReceiver && (
         <button
           type="button"
           className={`role-flow-btn ${active === 'receiver' ? 'role-flow-btn-active' : ''}`}

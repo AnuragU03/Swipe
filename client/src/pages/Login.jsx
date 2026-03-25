@@ -10,7 +10,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const { login, register } = useAuth();
+  const { login, register, reviewerLogin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -30,10 +30,22 @@ export default function Login() {
     try {
       if (isRegister) {
         await register(email.trim(), password, name.trim());
+        navigate('/', { replace: true });
       } else {
-        await login(email.trim(), password);
+        try {
+          await login(email.trim(), password);
+          navigate('/', { replace: true });
+          return;
+        } catch (senderError) {
+          try {
+            await reviewerLogin(email.trim(), password);
+            navigate('/reviewer', { replace: true });
+            return;
+          } catch {
+            throw senderError;
+          }
+        }
       }
-      navigate('/', { replace: true });
     } catch (err) {
       setError(err.message || 'Authentication failed');
     } finally {

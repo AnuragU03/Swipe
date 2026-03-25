@@ -111,6 +111,8 @@ export default function ReviewerDashboard() {
     return <span className={`badge ${cls}`}>{normalizedStatus}</span>;
   };
 
+  const showBecomeSender = !reviewer?.hasSenderAccess;
+
   return (
     <div className="app-shell">
       <div className="page">
@@ -132,6 +134,39 @@ export default function ReviewerDashboard() {
           <RoleFlowToggle active="receiver" />
         </div>
 
+        {showBecomeSender && (
+          <div
+            className="anim-fade-up"
+            style={{
+              marginBottom: 14,
+              padding: '14px 16px',
+              borderRadius: 16,
+              border: '1px solid rgba(255,255,255,0.1)',
+              background: 'rgba(255,255,255,0.02)',
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Want to become a sender?</div>
+            <div style={{ fontSize: 13, color: 'var(--sub)', lineHeight: 1.5, marginBottom: 12 }}>
+              Use the same name and email to create a sender account and start sharing review links.
+            </div>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() =>
+                navigate('/login', {
+                  state: {
+                    mode: 'register',
+                    name: reviewer?.name || '',
+                    email: reviewer?.email || '',
+                  },
+                })
+              }
+            >
+              Become a Sender
+            </button>
+          </div>
+        )}
+
         {!loading && !error && (
           <div className="stats-grid-3" style={{ marginBottom: 14 }}>
             <div className="stat-card">
@@ -139,11 +174,11 @@ export default function ReviewerDashboard() {
               <div className="label">Reviews Done</div>
             </div>
             <div className="stat-card">
-              <div className="num">{uniqueClients}</div>
+              <div className="num" style={{ color: 'var(--like)' }}>{uniqueClients}</div>
               <div className="label">Clients</div>
             </div>
             <div className="stat-card">
-              <div className="num">{uniqueProjects}</div>
+              <div className="num" style={{ color: 'var(--accent)' }}>{uniqueProjects}</div>
               <div className="label">Projects</div>
             </div>
           </div>
@@ -165,6 +200,7 @@ export default function ReviewerDashboard() {
               <div key={client.clientId} className="dashboard-client-card fade-in">
                 <div className="dashboard-card-header" style={{ marginBottom: 8 }}>
                   <div>
+                    <div className="dashboard-entity-label">Client</div>
                     <div className="dashboard-client-title">{client.clientName}</div>
                     <div className="dashboard-client-meta">
                       {client.projects.length} project{client.projects.length !== 1 ? 's' : ''}
@@ -230,7 +266,10 @@ export default function ReviewerDashboard() {
                           </div>
 
                           <div className="dashboard-session-topline">
-                            <div className="dashboard-project-title">{project.projectName}</div>
+                            <div>
+                              <div className="dashboard-entity-label dashboard-entity-label-project">Project</div>
+                              <div className="dashboard-project-title">{project.projectName}</div>
+                            </div>
                             <div>{renderStatus(projectStatus)}</div>
                           </div>
 
@@ -245,14 +284,14 @@ export default function ReviewerDashboard() {
                               </div>
                             </div>
                             <div className="dashboard-reviewer-metrics">
-                              <span>👍 {Math.max(0, totalApprovals)}</span>
-                              <span>👎 {Math.max(0, totalRejections)}</span>
+                              <span className="metric-chip metric-chip-like">{Math.max(0, totalApprovals)}</span>
+                              <span className="metric-chip metric-chip-dislike">{Math.max(0, totalRejections)}</span>
                             </div>
                           </div>
 
                           <div className="dashboard-project-foot">
                             <div>{totalComments} comment{totalComments !== 1 ? 's' : ''}</div>
-                            <div>{formatRelativeTime(lastActivity)}</div>
+                            <div className="dashboard-project-time">{formatRelativeTime(lastActivity)}</div>
                           </div>
                         </div>
                       </div>

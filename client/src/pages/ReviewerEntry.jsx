@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
-import BackButton from '../components/BackButton';
 
 export default function ReviewerEntry() {
   const { sessionId } = useParams();
@@ -56,12 +55,11 @@ export default function ReviewerEntry() {
 
   return (
     <div className="app-shell" style={{ justifyContent: 'center' }}>
-      <div className="page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100%' }}>
+      <div
+        className="page"
+        style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100%' }}
+      >
         <div style={{ maxWidth: 420, width: '100%', margin: '0 auto' }}>
-          <div style={{ marginBottom: 10 }}>
-            <BackButton />
-          </div>
-
           <div className="anim-fade-up" style={{ textAlign: 'center', marginBottom: 32 }}>
             <div
               style={{
@@ -85,13 +83,29 @@ export default function ReviewerEntry() {
             <div className="logo" style={{ fontSize: 28, justifyContent: 'center', marginBottom: 12 }}>
               Creative<span>Swipe</span>
             </div>
-            <p style={{ fontSize: 15, color: 'var(--sub)', lineHeight: 1.6, maxWidth: 300, margin: '0 auto' }}>
+            <p
+              style={{
+                fontSize: 15,
+                color: 'var(--sub)',
+                lineHeight: 1.6,
+                maxWidth: 300,
+                margin: '0 auto',
+              }}
+            >
               You have been invited to review creative assets. Swipe to approve or reject.
             </p>
           </div>
 
           <div className="glass-panel anim-fade-up" style={{ marginBottom: 16, padding: 14, overflow: 'hidden' }}>
-            <div style={{ fontSize: 11, letterSpacing: '0.08em', color: 'var(--sub)', textTransform: 'uppercase', marginBottom: 8 }}>
+            <div
+              style={{
+                fontSize: 11,
+                letterSpacing: '0.08em',
+                color: 'var(--sub)',
+                textTransform: 'uppercase',
+                marginBottom: 8,
+              }}
+            >
               Work Preview
             </div>
 
@@ -185,12 +199,12 @@ export default function ReviewerEntry() {
 
           <div className="instruction-row anim-fade-up" style={{ animationDelay: '0.2s', marginTop: 32 }}>
             {[
-              { icon: 'X', label: 'Reject' },
-              { icon: '+', label: 'Post Comment' },
-              { icon: '✓', label: 'Approve' },
+              { iconClass: 'instruction-icon-reject', label: 'Reject' },
+              { iconClass: 'instruction-icon-comment', label: 'Post Comment' },
+              { iconClass: 'instruction-icon-approve', label: 'Approve' },
             ].map((item) => (
               <div key={item.label} className="instruction-item">
-                <div className="instruction-icon">{item.icon}</div>
+                <div className={`instruction-icon ${item.iconClass}`} />
                 <span className="instruction-label">{item.label}</span>
               </div>
             ))}
