@@ -14,6 +14,120 @@ const makeRow = (channel = 'LinkedIn') => ({
 const sanitizeFileName = (name = 'upload') => String(name).replace(/\s+/g, '_');
 const formatBytes = (bytes) => `${((bytes || 0) / (1024 * 1024)).toFixed(1)} MB`;
 
+function PreviewIcon({ kind, size = 20, stroke = 'currentColor', fill = 'none' }) {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill,
+    stroke,
+    strokeWidth: 1.8,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': true,
+  };
+
+  switch (kind) {
+    case 'dots':
+      return (
+        <svg {...common}>
+          <circle cx="5" cy="12" r="1.6" fill={stroke} stroke="none" />
+          <circle cx="12" cy="12" r="1.6" fill={stroke} stroke="none" />
+          <circle cx="19" cy="12" r="1.6" fill={stroke} stroke="none" />
+        </svg>
+      );
+    case 'heart':
+      return (
+        <svg {...common}>
+          <path d="M12 20s-6.5-3.9-8.6-7.5C1.8 9.7 3.1 6.5 6.2 6.1c1.8-.2 3.1.6 3.8 1.9.7-1.3 2-2.1 3.8-1.9 3.1.4 4.4 3.6 2.8 6.4C18.5 16.1 12 20 12 20Z" />
+        </svg>
+      );
+    case 'comment':
+      return (
+        <svg {...common}>
+          <path d="M20 15a3 3 0 0 1-3 3H9l-4 3v-3H7a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3Z" />
+        </svg>
+      );
+    case 'share':
+      return (
+        <svg {...common}>
+          <path d="M14 5h5v5" />
+          <path d="M10 14 19 5" />
+          <path d="M19 13v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" />
+        </svg>
+      );
+    case 'bookmark':
+      return (
+        <svg {...common}>
+          <path d="M7 4h10v16l-5-3-5 3V4Z" />
+        </svg>
+      );
+    case 'thumbUp':
+      return (
+        <svg {...common}>
+          <path d="M7 11v9" />
+          <path d="M10 20h6.2a2 2 0 0 0 1.9-1.4l1.4-4.2A2 2 0 0 0 17.6 12H14V7.6A2.6 2.6 0 0 0 11.4 5L10 11Z" />
+          <path d="M7 11H4v9h3" />
+        </svg>
+      );
+    case 'thumbDown':
+      return (
+        <svg {...common}>
+          <path d="M17 13V4" />
+          <path d="M14 4H7.8a2 2 0 0 0-1.9 1.4l-1.4 4.2A2 2 0 0 0 6.4 12H10v4.4A2.6 2.6 0 0 0 12.6 19L14 13Z" />
+          <path d="M17 13h3V4h-3" />
+        </svg>
+      );
+    case 'repost':
+      return (
+        <svg {...common}>
+          <path d="M7 7h10l-3-3" />
+          <path d="M17 17H7l3 3" />
+          <path d="M17 7v4" />
+          <path d="M7 17v-4" />
+        </svg>
+      );
+    case 'send':
+      return (
+        <svg {...common}>
+          <path d="m22 2-7 20-4-9-9-4 20-7Z" />
+          <path d="M22 2 11 13" />
+        </svg>
+      );
+    case 'arrowLeft':
+      return (
+        <svg {...common}>
+          <path d="M15 18 9 12l6-6" />
+        </svg>
+      );
+    case 'search':
+      return (
+        <svg {...common}>
+          <circle cx="11" cy="11" r="6" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+      );
+    case 'play':
+      return (
+        <svg {...common}>
+          <path d="M8 6v12l10-6Z" fill={stroke} stroke="none" />
+        </svg>
+      );
+    case 'trash':
+      return (
+        <svg {...common}>
+          <path d="M4 7h16" />
+          <path d="M9 7V5h6v2" />
+          <path d="M7 7l1 12h8l1-12" />
+          <path d="M10 11v5" />
+          <path d="M14 11v5" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
 export default function CreateSession() {
   const navigate = useNavigate();
   const bulkInputRef = useRef(null);
@@ -49,9 +163,20 @@ export default function CreateSession() {
     return () => { mounted = false; };
   }, []);
 
+  const catalogSessions = useMemo(
+    () =>
+      historySessions.filter(
+        (session) =>
+          (Number(session.imageCount) || 0) > 0 ||
+          (Number(session.postCount) || 0) > 0 ||
+          (session.previewImages || []).length > 0
+      ),
+    [historySessions]
+  );
+
   const clientCatalog = useMemo(() => {
     const map = new Map();
-    historySessions.forEach((session) => {
+    catalogSessions.forEach((session) => {
       const normalizedClient = String(session.clientName || '').trim();
       if (!normalizedClient) return;
       const clientId = session.clientId || `client-${normalizedClient.toLowerCase()}`;
@@ -76,7 +201,7 @@ export default function CreateSession() {
       projects: Array.from(client.projects.values()).sort((a, b) => a.name.localeCompare(b.name)),
       reviewers: Array.from(client.reviewers.values()).sort((a, b) => a.name.localeCompare(b.name)),
     })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [historySessions]);
+  }, [catalogSessions]);
 
   const selectedClient = useMemo(
     () => clientCatalog.find((client) => client.id === clientChoice) || null,
@@ -154,46 +279,107 @@ export default function CreateSession() {
   const renderPlatformPreview = (row) => {
     const media = row.file;
     const isVideo = String(media?.contentType || '').startsWith('video/');
+    const renderMedia = (className = '', { nativeControls = false } = {}) =>
+      media ? (
+        isVideo ? (
+          <video
+            className={className}
+            src={media.preview}
+            muted
+            playsInline
+            preload="metadata"
+            controls={nativeControls}
+            autoPlay={!nativeControls}
+            loop={!nativeControls}
+          />
+        ) : (
+          <img className={className} src={media.preview} alt={media.fileName} />
+        )
+      ) : (
+        <div className="social-preview-media-empty">Upload media to preview this layout</div>
+      );
+
     if (row.channel === 'Instagram') {
       return (
-        <div className="platform-card ig-card">
-          <div className="ig-top">
+        <div className="platform-card template-platform-card ig-card ig-card-template">
+          <div className="ig-top ig-top-template">
             <div className="ig-avatar" />
-            <div>
+            <div className="ig-head-copy">
               <div className="ig-name">{projectName || 'project_account'}</div>
-              <div className="ig-meta">{clientName || 'Client'}</div>
+              <div className="ig-meta">{clientName || 'Client'} • just now</div>
+            </div>
+            <div className="ig-menu-btn">
+              <PreviewIcon kind="dots" size={18} stroke="#fafafa" />
             </div>
           </div>
-          <div className="ig-media">
-            {media ? (
-              isVideo ? (
-                <video src={media.preview} controls muted playsInline />
-              ) : (
-                <img src={media.preview} alt={media.fileName} />
-              )
-            ) : (
-              <div className="social-preview-media-empty">Upload media for Instagram preview</div>
-            )}
+          <div className="ig-media ig-media-template">
+            {renderMedia('', { nativeControls: false })}
           </div>
-          <div className="ig-bottom">
-            <div className="ig-actions ig-actions-real">
-              <span>♡</span>
-              <span>💬</span>
-              <span>✈</span>
-              <span style={{ marginLeft: 'auto' }}>🔖</span>
+          <div className="ig-bottom ig-bottom-template">
+            <div className="ig-actions ig-actions-real ig-actions-template">
+              <div className="ig-actions-left">
+                <span className="ig-action-button"><PreviewIcon kind="heart" size={22} stroke="#fafafa" /></span>
+                <span className="ig-action-button"><PreviewIcon kind="comment" size={22} stroke="#fafafa" /></span>
+                <span className="ig-action-button"><PreviewIcon kind="share" size={22} stroke="#fafafa" /></span>
+              </div>
+              <span className="ig-action-button ig-action-save-btn"><PreviewIcon kind="bookmark" size={22} stroke="#fafafa" /></span>
             </div>
             <div className="ig-caption">
               <strong>{projectName || 'project_account'}</strong>{' '}
-              {row.text || 'Captions will appear here.'}
+              {row.text || 'Add caption'}
             </div>
           </div>
         </div>
       );
     }
     if (row.channel === 'LinkedIn') {
-      return <div className="platform-card li-card"><div className="li-top"><div className="li-avatar" /><div><div className="li-company">{clientName || 'Client Company'}</div><div className="li-meta">Sponsored | just now</div></div></div><div className="li-copy">{row.text || 'Captions will appear here.'}</div><div className="li-media">{media ? (isVideo ? <video src={media.preview} controls muted playsInline /> : <img src={media.preview} alt={media.fileName} />) : <div className="social-preview-media-empty">Upload image or video for LinkedIn preview</div>}</div><div className="li-actions"><span>Like</span><span>Comment</span><span>Repost</span><span>Send</span></div></div>;
+      return (
+        <div className="platform-card template-platform-card li-card li-card-template">
+          <div className="li-top li-top-template">
+            <div className="li-avatar" />
+            <div className="li-head-copy">
+              <div className="li-company">{clientName || 'Client Company'}</div>
+              <div className="li-meta">{projectName || 'Project'} • just now</div>
+            </div>
+            <div className="li-menu-btn">
+              <PreviewIcon kind="dots" size={18} stroke="#5f6368" />
+            </div>
+          </div>
+          <div className="li-copy li-copy-template">{row.text || 'Add caption'}</div>
+          <div className="li-media li-media-template">{renderMedia('', { nativeControls: false })}</div>
+          <div className="li-actions li-actions-template">
+            <span className="li-action-button"><PreviewIcon kind="thumbUp" size={18} stroke="#666" />Like</span>
+            <span className="li-action-button"><PreviewIcon kind="comment" size={18} stroke="#666" />Comment</span>
+            <span className="li-action-button"><PreviewIcon kind="repost" size={18} stroke="#666" />Repost</span>
+            <span className="li-action-button"><PreviewIcon kind="send" size={18} stroke="#666" />Send</span>
+          </div>
+        </div>
+      );
     }
-    return <div className="platform-card yt-card"><div className="yt-media">{media ? (isVideo ? <video src={media.preview} controls muted playsInline /> : <img src={media.preview} alt={media.fileName} />) : <div className="social-preview-media-empty">Upload media for YouTube preview</div>}</div><div className="yt-content"><div className="yt-title">{row.text || `${projectName || 'Project'} video title`}</div><div className="yt-meta">{clientName || 'Channel'} | Preview</div></div></div>;
+    return (
+      <div className="platform-card template-platform-card yt-card yt-shorts-card">
+        <div className="yt-media yt-shorts-media">{renderMedia('', { nativeControls: false })}</div>
+        <div className="yt-shorts-top">
+          <span className="yt-top-icon"><PreviewIcon kind="arrowLeft" size={20} stroke="#fff" /></span>
+          <span className="yt-top-icon"><PreviewIcon kind="dots" size={20} stroke="#fff" /></span>
+        </div>
+        <div className="yt-shorts-actions">
+          <span className="yt-action-item"><PreviewIcon kind="thumbUp" size={22} stroke="#fff" /></span>
+          <span className="yt-action-item"><PreviewIcon kind="thumbDown" size={22} stroke="#fff" /></span>
+          <span className="yt-action-item"><PreviewIcon kind="comment" size={22} stroke="#fff" /></span>
+          <span className="yt-action-item"><PreviewIcon kind="share" size={22} stroke="#fff" /></span>
+        </div>
+        <div className="yt-content yt-shorts-content">
+          <div className="yt-channel-row">
+            <div className="yt-channel-avatar" />
+            <div className="yt-channel-name">{clientName || 'Channel'}</div>
+            <span className="yt-subscribe-chip">Subscribe</span>
+          </div>
+          <div className="yt-title">{row.text || `${projectName || 'Project'} Shorts title`}</div>
+          <div className="yt-meta">{projectName || 'Project'} • Preview</div>
+        </div>
+      </div>
+    );
   };
 
   const handlePlatformFileChange = async (rowIndex, fileList) => {
@@ -587,12 +773,14 @@ export default function CreateSession() {
                     {bulkFiles.length === 0 ? (
                       <div className="template-preview-item" style={{ color: 'var(--sub)', fontSize: 12 }}>Upload files to see previews.</div>
                     ) : (
-                      bulkFiles.map((file, index) => (
-                        <div key={file.id} className="bulk-preview-card template-preview-shell">
-                          <button type="button" className="template-preview-remove" onClick={() => removeBulkFile(file.id)}>x</button>
-                          <div className="bulk-preview-media">
-                            {String(file.contentType || '').startsWith('video/') ? <video src={file.preview} controls muted playsInline /> : <img src={file.preview} alt={file.fileName} />}
-                          </div>
+                        bulkFiles.map((file, index) => (
+                          <div key={file.id} className="bulk-preview-card template-preview-shell">
+                            <button type="button" className="template-preview-remove" aria-label={`Delete upload ${index + 1}`} onClick={() => removeBulkFile(file.id)}>
+                              <PreviewIcon kind="trash" size={14} stroke="currentColor" />
+                            </button>
+                            <div className="bulk-preview-media">
+                              {String(file.contentType || '').startsWith('video/') ? <video src={file.preview} controls muted playsInline /> : <img src={file.preview} alt={file.fileName} />}
+                            </div>
                           <div className="bulk-preview-meta">Upload {index + 1}</div>
                         </div>
                       ))
@@ -612,18 +800,22 @@ export default function CreateSession() {
                           </label>
                           <textarea
                             className="template-text-box"
-                            placeholder="Captions"
+                            placeholder="Add caption"
                             value={row.text}
                             onChange={(event) => setPlatformRows((prev) => prev.map((item) => (item.id === row.id ? { ...item, text: event.target.value } : item)))}
                           />
                         </div>
                         <div className="template-row-preview-grid">
                           {row.file ? (
-                            <div className="template-preview-item template-preview-shell">
-                              <button type="button" className="template-preview-remove" onClick={() => removePlatformRow(row.id)}>x</button>
-                              <div className="template-preview-btn" style={{ cursor: 'default' }}>
-                                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--sub)', marginBottom: 6 }}>Upload {rowIndex + 1}</div>
-                                {renderPlatformPreview(row)}
+                              <div className="template-preview-item template-preview-shell">
+                                <div className="template-preview-head">
+                                  <div className="template-preview-label">Preview</div>
+                                  <button type="button" className="template-preview-remove" aria-label={`Delete row ${rowIndex + 1}`} onClick={() => removePlatformRow(row.id)}>
+                                    <PreviewIcon kind="trash" size={14} stroke="currentColor" />
+                                  </button>
+                                </div>
+                                <div className="template-preview-frame">
+                                  {renderPlatformPreview(row)}
                               </div>
                             </div>
                           ) : (
@@ -648,7 +840,7 @@ export default function CreateSession() {
 
         {step === 3 && createdSession && (
           <div className="fade-in" style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center' }}>
-            <div className="complete-icon-badge" aria-hidden="true"><span className="complete-icon-glyph">OK</span></div>
+            <div className="complete-icon-badge" aria-hidden="true"><span className="complete-icon-glyph" /></div>
             <h3 style={{ fontSize: 22, fontWeight: 800 }}>{createdSession.title}</h3>
             <p style={{ color: 'var(--sub)', fontSize: 14 }}>Share this link with your reviewers:</p>
             <div className="share-link-box" style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>

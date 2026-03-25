@@ -3,6 +3,7 @@ import api from '../services/api';
 
 const AuthContext = createContext(null);
 const RECEIVER_LOGOUT_FLAG = 'receiverLogoutRequested';
+const normalizeEmail = (value) => String(value || '').toLowerCase().trim();
 
 export function AuthProvider({ children }) {
   const [creator, setCreator] = useState(null);
@@ -61,6 +62,13 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const data = await api.login(email, password);
+    const normalizedEmail = normalizeEmail(email);
+    if (reviewer && normalizeEmail(reviewer.email) !== normalizedEmail) {
+      sessionStorage.setItem(RECEIVER_LOGOUT_FLAG, '1');
+      api.clearReviewerSession();
+      setReviewerAccountToken(null);
+      setReviewer(null);
+    }
     setToken(data.token);
     setCreator(data.creator);
     return data;
@@ -68,6 +76,13 @@ export function AuthProvider({ children }) {
 
   const register = async (email, password, name) => {
     const data = await api.register(email, password, name);
+    const normalizedEmail = normalizeEmail(email);
+    if (reviewer && normalizeEmail(reviewer.email) !== normalizedEmail) {
+      sessionStorage.setItem(RECEIVER_LOGOUT_FLAG, '1');
+      api.clearReviewerSession();
+      setReviewerAccountToken(null);
+      setReviewer(null);
+    }
     setToken(data.token);
     setCreator(data.creator);
     return data;
@@ -75,6 +90,12 @@ export function AuthProvider({ children }) {
 
   const reviewerLogin = async (email, password) => {
     const data = await api.reviewerLogin(email, password);
+    const normalizedEmail = normalizeEmail(email);
+    if (creator && normalizeEmail(creator.email) !== normalizedEmail) {
+      api.clearCreatorSession();
+      setToken(null);
+      setCreator(null);
+    }
     sessionStorage.removeItem(RECEIVER_LOGOUT_FLAG);
     setReviewerAccountToken(data.token);
     setReviewer(data.reviewer);
@@ -83,6 +104,12 @@ export function AuthProvider({ children }) {
 
   const reviewerRegister = async (name, email, password) => {
     const data = await api.reviewerRegister(name, email, password);
+    const normalizedEmail = normalizeEmail(email);
+    if (creator && normalizeEmail(creator.email) !== normalizedEmail) {
+      api.clearCreatorSession();
+      setToken(null);
+      setCreator(null);
+    }
     sessionStorage.removeItem(RECEIVER_LOGOUT_FLAG);
     setReviewerAccountToken(data.token);
     setReviewer(data.reviewer);
@@ -91,7 +118,21 @@ export function AuthProvider({ children }) {
 
   const switchToReceiver = async (options = {}) => {
     const force = !!options.force;
-    if (reviewerAccountToken) return { ok: true, source: 'existing' };
+    const creatorEmail = normalizeEmail(creator?.email);
+    const reviewerEmail = normalizeEmail(reviewer?.email);
+
+    if (reviewerAccountToken) {
+      if (creatorEmail && reviewerEmail && creatorEmail === reviewerEmail) {
+        return { ok: true, source: 'existing' };
+      }
+      if (creatorEmail && reviewerEmail && creatorEmail !== reviewerEmail) {
+        sessionStorage.setItem(RECEIVER_LOGOUT_FLAG, '1');
+        api.clearReviewerSession();
+        setReviewerAccountToken(null);
+        setReviewer(null);
+      }
+    }
+
     if (!force && sessionStorage.getItem(RECEIVER_LOGOUT_FLAG) === '1') {
       return { ok: false, reason: 'logged-out' };
     }
@@ -107,7 +148,20 @@ export function AuthProvider({ children }) {
   };
 
   const switchToSender = async () => {
-    if (token) return { ok: true, source: 'existing' };
+    const creatorEmail = normalizeEmail(creator?.email);
+    const reviewerEmail = normalizeEmail(reviewer?.email);
+
+    if (token) {
+      if (creatorEmail && reviewerEmail && creatorEmail === reviewerEmail) {
+        return { ok: true, source: 'existing' };
+      }
+      if (creatorEmail && reviewerEmail && creatorEmail !== reviewerEmail) {
+        api.clearCreatorSession();
+        setToken(null);
+        setCreator(null);
+      }
+    }
+
     if (!reviewerAccountToken || !reviewer?.hasSenderAccess) {
       return { ok: false, reason: reviewerAccountToken ? 'not-allowed' : 'login-required' };
     }
@@ -141,8 +195,8 @@ export function AuthProvider({ children }) {
       reviewer,
       reviewerAccountToken,
       loading,
-      hasReceiverAccess: !!(reviewerAccountToken || creator?.hasReceiverAccess),
-      hasSenderAccess: !!(token || reviewer?.hasSenderAccess),
+      hasReceiverAccess: !!creator?.hasReceiverAccess,
+      hasSenderAccess: !!reviewer?.hasSenderAccess,
       login,
       register,
       reviewerLogin,

@@ -143,6 +143,25 @@ test.describe.serial('CreativeSwipe smoke', () => {
       await expect(
         page.getByText(new RegExp(`^Reviewer:\\s*${escapeForRegex(receiver.name)}$`))
       ).toBeVisible();
+
+      await page.getByText(projectName).click();
+      await expect(page).toHaveURL(new RegExp(`/reviewer/sessions/${sessionId}/history$`));
+      await expect(page.getByText('Decisions Given')).toBeVisible();
+      await expect(page.getByText('smoke.svg')).toBeVisible();
+
+      await page.goto(`${baseURL}/reviewer`);
+      await page.getByRole('button', { name: 'Logout' }).click();
+      await expect(page).toHaveURL(new RegExp('/reviewer/login$'));
+
+      await page.goto(`${baseURL}/login`);
+      await page.getByPlaceholder('you@company.com').fill(receiver.email);
+      await page.getByPlaceholder('Enter your password').fill(receiver.password);
+      await page.getByRole('button', { name: 'Sign In' }).click();
+
+      await expect(page).toHaveURL(new RegExp('/reviewer$'));
+      await expect(
+        page.getByText(new RegExp(`^Reviewer:\\s*${escapeForRegex(receiver.name)}$`))
+      ).toBeVisible();
     } finally {
       if (creatorToken && sessionId) {
         await request.delete(`${baseURL}/api/sessions/${sessionId}`, {

@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
 import SwipeCard from '../components/SwipeCard';
 import ZoomableImage from '../components/ZoomableImage';
-import BackButton from '../components/BackButton';
 
 function isVideoAsset(asset) {
   const source = String(asset?.contentType || asset?.fileName || '').toLowerCase();
@@ -221,7 +220,12 @@ export default function ReviewerSwipe() {
           </div>
           <div className="ig-media">{renderMedia(image)}</div>
           <div className="ig-bottom">
-            <div className="ig-actions">Like Comment Share Save</div>
+            <div className="ig-actions ig-actions-real">
+              <span className="ig-action-icon ig-action-like" />
+              <span className="ig-action-icon ig-action-comment" />
+              <span className="ig-action-icon ig-action-share" />
+              <span className="ig-action-icon ig-action-save" style={{ marginLeft: 'auto' }} />
+            </div>
             <div className="ig-caption">{text || 'No caption provided.'}</div>
           </div>
         </div>
@@ -304,7 +308,9 @@ export default function ReviewerSwipe() {
     return (
       <div className="app-shell no-scroll">
         <div className="complete-screen">
-          <div className="complete-emoji anim-pop">Done</div>
+          <div className="complete-icon-badge anim-pop" aria-hidden="true">
+            <span className="complete-icon-glyph" />
+          </div>
           <h2 style={{ fontSize: 24, fontWeight: 800 }}>All Done</h2>
           <p style={{ color: 'var(--sub)', fontSize: 15, lineHeight: 1.5, maxWidth: 300 }}>
             You reviewed {images.length} image{images.length !== 1 ? 's' : ''}.
@@ -355,7 +361,6 @@ export default function ReviewerSwipe() {
     <div className="app-shell no-scroll">
       <div className="header-bar" style={{ padding: '16px 20px 8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <BackButton />
           <div className="logo" style={{ fontSize: 18 }}>
             Creative<span>Swipe</span>
           </div>
@@ -427,38 +432,28 @@ export default function ReviewerSwipe() {
           onClick={goPrev}
           disabled={currentIndex === 0}
           style={{ opacity: currentIndex === 0 ? 0.3 : 1 }}
-          aria-label="Undo"
-        >
-          ↺
-        </button>
-
-        <button
-          type="button"
-          className={`btn-chat-comment ${pinMode ? 'post-comment-active' : ''}`}
-          onClick={() => setPinMode(!pinMode)}
-          title="Post Comment"
-        >
-          {pinMode ? 'Posting Comment...' : 'Post Comment'}
-        </button>
+          aria-label="Undo" />
 
         <button
           type="button"
           className="action-btn btn-dislike"
           onClick={() => handleDecision(false)}
-          aria-label="Reject"
-        >
-          ✕
-        </button>
+          aria-label="Reject" />
+
+        <button
+          type="button"
+          className={`action-btn btn-pin ${pinMode ? 'btn-pin-active' : ''}`}
+          onClick={() => setPinMode(!pinMode)}
+          title="Post Comment"
+          aria-label={pinMode ? 'Posting comment' : 'Post comment'} />
 
         <button
           type="button"
           className="action-btn btn-like"
           onClick={() => handleDecision(true)}
-          aria-label="Approve"
-        >
-          ✓
-        </button>
+          aria-label="Approve" />
       </div>
     </div>
   );
 }
+

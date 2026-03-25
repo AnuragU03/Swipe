@@ -5,7 +5,14 @@ import { useAuth } from '../context/AuthContext';
 export default function ReviewerLogin() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { reviewerLogin, reviewerRegister, reviewer, loading: authLoading } = useAuth();
+  const {
+    reviewerLogin,
+    reviewerRegister,
+    reviewer,
+    creator,
+    switchToReceiver,
+    loading: authLoading,
+  } = useAuth();
 
   const [isRegister, setIsRegister] = useState(false);
   const [name, setName] = useState('');
@@ -19,6 +26,27 @@ export default function ReviewerLogin() {
       navigate('/reviewer', { replace: true });
     }
   }, [authLoading, reviewer, navigate]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const establishReceiver = async () => {
+      if (authLoading || reviewer || !creator?.hasReceiverAccess) return;
+      try {
+        const result = await switchToReceiver({ force: true });
+        if (!cancelled && result.ok) {
+          navigate('/reviewer', { replace: true });
+        }
+      } catch {
+        // Explicit receiver login/register flow remains the fallback.
+      }
+    };
+
+    establishReceiver();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, reviewer, creator, switchToReceiver, navigate]);
 
   useEffect(() => {
     const state = location.state || {};
@@ -118,15 +146,6 @@ export default function ReviewerLogin() {
               style={{ marginTop: 2, width: '100%' }}
             >
               {loading ? 'Please wait...' : isRegister ? 'Create Account' : 'Open Receiver Dashboard'}
-            </button>
-
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => navigate('/login')}
-              style={{ width: '100%' }}
-            >
-              Go to Sender Login
             </button>
           </div>
         </form>

@@ -86,8 +86,8 @@ function FileCard({ image, onDelete, deleting }) {
         </div>
 
         <div className="asset-card-summary">
-          <span>Likes {image.likes || 0}</span>
-          <span>Dislikes {image.dislikes || 0}</span>
+          <span className="metric-chip metric-chip-like">{image.likes || 0}</span>
+          <span className="metric-chip metric-chip-dislike">{image.dislikes || 0}</span>
           <span>Comments {(image.annotations || []).length}</span>
         </div>
       </div>
@@ -224,26 +224,27 @@ export default function SessionResults() {
       <div className="page results-page">
         <header className="results-header">
           <div className="results-header-main">
-            <button type="button" className="btn-back" onClick={() => navigate(-1)}>
-              &lt; Back
-            </button>
-            <div className="logo">
-              Creative<span>Swipe</span>
-            </div>
-            <div className="results-header-meta">
-              <span className={`badge badge-${session.status}`}>{session.status}</span>
-              <button type="button" className="btn-ghost" onClick={() => navigate('/')}>
-                Dashboard
+            <div className="results-header-main-left">
+              <button type="button" className="btn-back" onClick={() => navigate(-1)}>
+                &lt; Back
               </button>
+              <div className="logo">
+                Creative<span>Swipe</span>
+              </div>
             </div>
           </div>
           <div className="results-header-copy">
-            <div className="results-client-line">
-              {normalizeText(session.clientName, 'Client')} - {normalizeText(session.projectName || session.title, 'Project')}
+            <div className="dashboard-entity-label">Client</div>
+            <div className="results-client-line results-client-line-with-status">
+              <div className="results-client-name">
+                {normalizeText(session.clientName, 'Client')}
+              </div>
+              <span className={`badge badge-${session.status}`}>{session.status}</span>
             </div>
+            <div className="dashboard-entity-label dashboard-entity-label-project">Project</div>
             <div className="results-project-name">{normalizeText(session.projectName || session.title, 'Project')}</div>
             <div className="results-project-copy">
-              Review link, asset files, and reviewer feedback for this project.
+              Review link, files, and feedback.
             </div>
           </div>
         </header>
@@ -283,8 +284,8 @@ export default function SessionResults() {
 
           <div className="results-summary-row">
             <div className="results-summary-counts">
-              <span>Likes {totalLikes}</span>
-              <span>Dislikes {totalDislikes}</span>
+              <span className="metric-chip metric-chip-like">{totalLikes}</span>
+              <span className="metric-chip metric-chip-dislike">{totalDislikes}</span>
               <span>Comments {totalAnnotations}</span>
             </div>
             <div className="results-summary-time">{formatRelativeTime(lastActivityAt)}</div>
@@ -359,7 +360,10 @@ export default function SessionResults() {
                         onClick={() => setSelectedReviewer(active ? null : index)}
                       >
                         <span>{normalizeText(submission.reviewerName, 'Reviewer')}</span>
-                        <span>{likes} up | {dislikes} down</span>
+                        <span className="reviewer-chip-metrics">
+                          <span className="metric-chip metric-chip-like">{likes}</span>
+                          <span className="metric-chip metric-chip-dislike">{dislikes}</span>
+                        </span>
                       </button>
                     );
                   })}
@@ -392,8 +396,8 @@ export default function SessionResults() {
                           <div className="results-review-time">{formatDateTime(submission.submittedAt)}</div>
                         </div>
                         <div className="results-summary-counts">
-                          <span>{likes} up</span>
-                          <span>{dislikes} down</span>
+                          <span className="metric-chip metric-chip-like">{likes}</span>
+                          <span className="metric-chip metric-chip-dislike">{dislikes}</span>
                           <span>{subAnnotations.length} comments</span>
                         </div>
                       </div>

@@ -657,6 +657,7 @@ app.get('/api/reviewer/sessions/:id/history', async (req, res) => {
         imageId: decision.imageId,
         liked: !!decision.liked,
         fileName: image?.fileName || null,
+        contentType: image?.contentType || null,
         rowOrder: Number(image?.rowOrder) || null,
         url: image?.blobName ? storage.generateSignedUrl(image.blobName) : null,
       };
@@ -671,6 +672,7 @@ app.get('/api/reviewer/sessions/:id/history', async (req, res) => {
         y: annotation.y,
         createdAt: annotation.createdAt || reviewerSubmission.submittedAt,
         fileName: image?.fileName || null,
+        contentType: image?.contentType || null,
         rowOrder: Number(image?.rowOrder) || null,
         url: image?.blobName ? storage.generateSignedUrl(image.blobName) : null,
       };
@@ -817,23 +819,47 @@ app.get('/api/sessions', async (req, res) => {
     );
 
     const responseSessions = sessionsWithCounts.map((session) => {
-      const submittedContacts = mergeReviewerContacts(
-        (session._submissions || []).map((sub) => ({
+      const reviewerProgressMap = new Map();
+
+      (session._submissions || []).forEach((sub) => {
+        const contact = toReviewerContact({
           reviewerName: sub.reviewerName,
           reviewerEmail: sub.reviewerEmail,
-        }))
-      );
+        });
+        if (!contact) return;
 
-      const knownContacts = mergeReviewerContacts(
-        submittedContacts
-      );
+        const existing = reviewerProgressMap.get(contact.email) || {
+          name: contact.name,
+          email: contact.email,
+          status: 'done',
+          likeCount: 0,
+          dislikeCount: 0,
+          annotationCount: 0,
+          submissionCount: 0,
+          submittedAt: null,
+        };
 
-      const submittedByEmail = new Map(submittedContacts.map((contact) => [contact.email, contact]));
-      const reviewerProgress = knownContacts.map((contact) => ({
-        name: submittedByEmail.get(contact.email)?.name || contact.name,
-        email: contact.email,
-        status: submittedByEmail.has(contact.email) ? 'done' : 'pending',
-      }));
+        existing.name = existing.name || contact.name;
+        existing.likeCount += (sub.decisions || []).filter((item) => item.liked).length;
+        existing.dislikeCount += (sub.decisions || []).filter((item) => !item.liked).length;
+        existing.annotationCount += (sub.annotations || []).length;
+        existing.submissionCount += 1;
+
+        const submittedTime = new Date(sub.submittedAt || 0).getTime();
+        const existingTime = new Date(existing.submittedAt || 0).getTime();
+        if (submittedTime && submittedTime >= existingTime) {
+          existing.submittedAt = sub.submittedAt;
+        }
+
+        reviewerProgressMap.set(contact.email, existing);
+      });
+
+      const reviewerProgress = Array.from(reviewerProgressMap.values()).sort((left, right) => {
+        const rightTime = new Date(right.submittedAt || 0).getTime();
+        const leftTime = new Date(left.submittedAt || 0).getTime();
+        if (rightTime !== leftTime) return rightTime - leftTime;
+        return String(left.name || left.email).localeCompare(String(right.name || right.email));
+      });
 
       const { _submissions, ...sessionView } = session;
       return {
