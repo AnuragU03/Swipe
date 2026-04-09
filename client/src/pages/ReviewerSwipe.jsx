@@ -1,12 +1,66 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
 import SwipeCard from '../components/SwipeCard';
 import ZoomableImage from '../components/ZoomableImage';
+import VideoPlayer from '../components/VideoPlayer';
 
 function isVideoAsset(asset) {
   const source = String(asset?.contentType || asset?.fileName || '').toLowerCase();
   return source.startsWith('video/') || /\.(mp4|mov|avi|webm|mkv)$/i.test(source);
+}
+
+function SocialIcon({ type, className = '' }) {
+  switch (type) {
+    case 'heart':
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.4A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" />
+        </svg>
+      );
+    case 'comment':
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v4A3.5 3.5 0 0 1 15.5 14H11l-4 4v-4.4A3.5 3.5 0 0 1 5 10.5Z" />
+        </svg>
+      );
+    case 'share':
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m14 4 6 6-6 6" />
+          <path d="M20 10H9a5 5 0 0 0-5 5v1" />
+        </svg>
+      );
+    case 'bookmark':
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M7 4h10v16l-5-3-5 3Z" />
+        </svg>
+      );
+    case 'thumbs-up':
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M7 21H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3" />
+          <path d="M11 10V5a2 2 0 0 1 2-2l1 6h4a2 2 0 0 1 2 2l-1 6a2 2 0 0 1-2 2H7V10Z" />
+        </svg>
+      );
+    case 'thumbs-down':
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M7 3H4a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h3" />
+          <path d="M11 14v5a2 2 0 0 0 2 2l1-6h4a2 2 0 0 0 2-2l-1-6a2 2 0 0 0-2-2H7v9Z" />
+        </svg>
+      );
+    case 'send':
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 3 10 14" />
+          <path d="m21 3-7 18-4-7-7-4Z" />
+        </svg>
+      );
+    default:
+      return null;
+  }
 }
 
 export default function ReviewerSwipe() {
@@ -22,10 +76,20 @@ export default function ReviewerSwipe() {
   const [pinMode, setPinMode] = useState(false);
   const [showPinModeTip, setShowPinModeTip] = useState(false);
   const [preloadProgress, setPreloadProgress] = useState({ loaded: 0, total: 0 });
+  const [gestureLocked, setGestureLocked] = useState(false);
+  const [videoTimestamp, setVideoTimestamp] = useState(0);
+  const [showVideoComment, setShowVideoComment] = useState(false);
+  const [videoCommentText, setVideoCommentText] = useState('');
+  const videoRef = useRef(null);
 
   useEffect(() => {
     setShowPinModeTip(pinMode);
   }, [pinMode]);
+
+  useEffect(() => {
+    if (!showVideoComment || !videoRef.current?.pause) return;
+    videoRef.current.pause();
+  }, [showVideoComment]);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,15 +262,24 @@ export default function ReviewerSwipe() {
   const renderMedia = (image) => {
     const mediaUrl = image.url || image.signedUrl;
     if (isVideoAsset(image)) {
-      return <video src={mediaUrl} autoPlay muted loop playsInline preload="auto" />;
+      return (
+        <VideoPlayer
+          ref={videoRef}
+          src={mediaUrl}
+          onTimeUpdate={setVideoTimestamp}
+          style={{ borderRadius: 12, overflow: 'hidden' }}
+        />
+      );
     }
-    return <ZoomableImage src={mediaUrl} alt={image.fileName || 'Creative'} />;
+    return <ZoomableImage src={mediaUrl} alt={image.fileName || 'Creative'} onZoomStateChange={setGestureLocked} />;
   };
 
   const renderTemplateCard = (image) => {
     if (!image) return null;
     const channel = String(image.templateChannel || '').toLowerCase();
     const text = image.templateText || '';
+    const resolvedClientName = image.clientName || 'Client';
+    const resolvedProjectName = image.projectName || 'Project';
 
     if (channel.includes('instagram')) {
       return (
@@ -214,17 +287,17 @@ export default function ReviewerSwipe() {
           <div className="ig-top">
             <div className="ig-avatar" />
             <div>
-              <div className="ig-name">project_account</div>
-              <div className="ig-meta">Shared review</div>
+              <div className="ig-name">{resolvedProjectName}</div>
+              <div className="ig-meta">{resolvedClientName} • just now</div>
             </div>
           </div>
           <div className="ig-media">{renderMedia(image)}</div>
           <div className="ig-bottom">
             <div className="ig-actions ig-actions-real">
-              <span className="ig-action-icon ig-action-like" />
-              <span className="ig-action-icon ig-action-comment" />
-              <span className="ig-action-icon ig-action-share" />
-              <span className="ig-action-icon ig-action-save" style={{ marginLeft: 'auto' }} />
+              <span className="ig-action-icon"><SocialIcon type="heart" className="social-action-svg" /></span>
+              <span className="ig-action-icon"><SocialIcon type="comment" className="social-action-svg" /></span>
+              <span className="ig-action-icon"><SocialIcon type="share" className="social-action-svg" /></span>
+              <span className="ig-action-icon" style={{ marginLeft: 'auto' }}><SocialIcon type="bookmark" className="social-action-svg" /></span>
             </div>
             <div className="ig-caption">{text || 'No caption provided.'}</div>
           </div>
@@ -238,17 +311,17 @@ export default function ReviewerSwipe() {
           <div className="li-top">
             <div className="li-avatar" />
             <div>
-              <div className="li-company">Client Company</div>
-              <div className="li-meta">Sponsored | just now</div>
+              <div className="li-company">{resolvedClientName}</div>
+              <div className="li-meta">{resolvedProjectName} • just now</div>
             </div>
           </div>
           <div className="li-copy">{text || 'No post text provided.'}</div>
           <div className="li-media">{renderMedia(image)}</div>
           <div className="li-actions">
-            <span>Like</span>
-            <span>Comment</span>
-            <span>Repost</span>
-            <span>Send</span>
+            <span className="li-action-button"><span className="li-action-glyph"><SocialIcon type="thumbs-up" className="social-action-svg social-action-svg-sm" /></span>Like</span>
+            <span className="li-action-button"><span className="li-action-glyph"><SocialIcon type="comment" className="social-action-svg social-action-svg-sm" /></span>Comment</span>
+            <span className="li-action-button"><span className="li-action-glyph"><SocialIcon type="share" className="social-action-svg social-action-svg-sm" /></span>Share</span>
+            <span className="li-action-button"><span className="li-action-glyph"><SocialIcon type="send" className="social-action-svg social-action-svg-sm" /></span>Send</span>
           </div>
         </div>
       );
@@ -257,10 +330,6 @@ export default function ReviewerSwipe() {
     return (
       <div className="platform-card yt-card reviewer-platform-card">
         <div className="yt-media">{renderMedia(image)}</div>
-        <div className="yt-content">
-          <div className="yt-title">{text || 'No video title or description provided.'}</div>
-          <div className="yt-meta">Shared review | Preview</div>
-        </div>
       </div>
     );
   };
@@ -367,7 +436,7 @@ export default function ReviewerSwipe() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 14, color: 'var(--sub)', fontWeight: 500 }}>
-            {Math.min(currentIndex + 1, images.length)} / {images.length}
+            Post {currentPostIndex + 1} / {postOrderList.length || 1}
           </span>
           <button
             type="button"
@@ -387,16 +456,6 @@ export default function ReviewerSwipe() {
             style={{ width: `${progress}%`, background: 'var(--accent)', color: 'var(--accent)' }}
           />
         </div>
-        {currentImage && postOrderList.length > 1 && (
-          <div className="reviewer-post-meta-row">
-            <span className="reviewer-post-pill">
-              Post {currentPostIndex + 1} / {postOrderList.length || 1}
-            </span>
-            <span className="reviewer-post-pill reviewer-post-pill-muted">
-              {currentImage.templateChannel || 'Template'}
-            </span>
-          </div>
-        )}
       </div>
 
       <div style={{ flex: 1, position: 'relative', padding: '8px 20px 0', overflow: 'hidden' }}>
@@ -419,13 +478,88 @@ export default function ReviewerSwipe() {
             onAnnotationAdd={handleAnnotation}
             annotations={annotations[currentImage.id] || []}
             pinMode={pinMode}
+            gestureLocked={gestureLocked}
             onPinModeTouchStart={() => setShowPinModeTip(false)}
             onPinModeUsed={() => setPinMode(false)}
           />
         )}
       </div>
 
-      <div className="action-bar safe-pb reviewer-swipe-actions" style={{ padding: '12px 20px 20px' }}>
+      <div className="reviewer-comment-helper">
+        {isVideoAsset(currentImage) ? (
+          // Video: timestamp comment button
+          <button
+            type="button"
+            className="reviewer-comment-pill"
+            id="video-add-timestamp-comment"
+            onClick={() => {
+              videoRef.current?.pause?.();
+              const ts = videoRef.current?.getCurrentTime?.() ?? videoTimestamp;
+              setVideoTimestamp(ts);
+              setVideoCommentText('');
+              setShowVideoComment(true);
+            }}
+          >
+            <span className="reviewer-comment-pill-icon"><SocialIcon type="comment" className="social-action-svg social-action-svg-sm" /></span>
+            Add comment at {(() => { const s = Math.floor(videoTimestamp); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; })()}
+          </button>
+        ) : (
+          // Image: spatial pin comment button
+          <button
+            type="button"
+            className={`reviewer-comment-pill ${pinMode ? 'reviewer-comment-pill-active' : ''}`}
+            onClick={() => setPinMode(!pinMode)}
+          >
+            <span className="reviewer-comment-pill-icon"><SocialIcon type="comment" className="social-action-svg social-action-svg-sm" /></span>
+            {pinMode ? 'Tap image to add comment' : 'Add comment'}
+          </button>
+        )}
+      </div>
+
+      {/* Video timestamp comment modal */}
+      {showVideoComment && (
+        <div className="confirm-overlay" onClick={() => setShowVideoComment(false)}>
+          <div className="confirm-dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+              <span style={{
+                padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700,
+                background: 'var(--accent)', color: '#fff',
+              }}>
+                ⏱ {(() => { const s = Math.floor(videoTimestamp); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; })()}
+              </span>
+              <span style={{ fontSize: 13, color: 'var(--sub)' }}>Timestamp comment</span>
+            </div>
+            <textarea
+              id="video-comment-input"
+              autoFocus
+              className="field"
+              rows={3}
+              placeholder="Add your comment here…"
+              value={videoCommentText}
+              onChange={e => setVideoCommentText(e.target.value)}
+              style={{ resize: 'none', width: '100%' }}
+            />
+            <div className="confirm-actions" style={{ marginTop: 12 }}>
+              <button type="button" className="btn-secondary" onClick={() => setShowVideoComment(false)}>Cancel</button>
+              <button
+                type="button"
+                className="btn-accent"
+                disabled={!videoCommentText.trim()}
+                onClick={() => {
+                  if (!videoCommentText.trim()) return;
+                  handleAnnotation({ timestampSec: videoTimestamp, comment: videoCommentText.trim() });
+                  setVideoCommentText('');
+                  setShowVideoComment(false);
+                }}
+              >
+                Post Comment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="action-bar safe-pb reviewer-swipe-actions" style={{ padding: '8px 20px 20px' }}>
         <button
           type="button"
           className="action-btn btn-undo"
@@ -439,13 +573,6 @@ export default function ReviewerSwipe() {
           className="action-btn btn-dislike"
           onClick={() => handleDecision(false)}
           aria-label="Reject" />
-
-        <button
-          type="button"
-          className={`action-btn btn-pin ${pinMode ? 'btn-pin-active' : ''}`}
-          onClick={() => setPinMode(!pinMode)}
-          title="Post Comment"
-          aria-label={pinMode ? 'Posting comment' : 'Post comment'} />
 
         <button
           type="button"

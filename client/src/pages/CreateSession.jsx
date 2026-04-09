@@ -147,6 +147,7 @@ export default function CreateSession() {
   const [newReviewerEmail, setNewReviewerEmail] = useState('');
   const [platformRows, setPlatformRows] = useState([makeRow('LinkedIn')]);
   const [bulkFiles, setBulkFiles] = useState([]);
+  const [isDragging, setIsDragging] = useState(false);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -405,9 +406,11 @@ export default function CreateSession() {
   };
 
   const handleBulkFileChange = async (fileList) => {
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
-    const converted = await Promise.all(files.map((file) => readFileAsBase64(file)));
+    const allowed = Array.from(fileList || []).filter((f) =>
+      f.type.startsWith('image/') || f.type.startsWith('video/')
+    );
+    if (!allowed.length) return;
+    const converted = await Promise.all(allowed.map((file) => readFileAsBase64(file)));
     setBulkFiles((prev) => [...prev, ...converted]);
   };
 
@@ -763,26 +766,55 @@ export default function CreateSession() {
                     <div className="bulk-storage-row"><span>This upload</span><strong>{formatBytes(totalUploadBytes)}</strong></div>
                     <div className="bulk-storage-row"><span>Account limit</span><strong>500.0 MB</strong></div>
                   </div>
-                  <button type="button" className="bulk-dropzone" onClick={() => bulkInputRef.current?.click()}>
+                  <div
+                    className={`bulk-dropzone${isDragging ? ' bulk-dropzone-active' : ''}`}
+                    onClick={() => bulkInputRef.current?.click()}
+                    onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                    onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setIsDragging(false); }}
+                    onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleBulkFileChange(e.dataTransfer.files); }}
+                    role="button" tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') bulkInputRef.current?.click(); }}
+                    aria-label="Upload files"
+                  >
                     <input ref={bulkInputRef} type="file" accept="image/*,video/*" multiple hidden onChange={(event) => handleBulkFileChange(event.target.files)} />
-                    <div className="bulk-dropzone-icon">+</div>
-                    <div className="bulk-dropzone-title">Drag and drop files here</div>
-                    <div className="bulk-dropzone-copy">Upload multiple files with no captions</div>
-                  </button>
+                    <div className="bulk-dropzone-icon" style={{ fontSize: isDragging ? 36 : 28, transition: 'font-size 0.2s' }}>
+                      {isDragging ? '📂' : '☁'}
+                    </div>
+                    <div className="bulk-dropzone-title">{isDragging ? 'Drop files here!' : 'Drag & drop or click to upload'}</div>
+                    <div className="bulk-dropzone-copy">Images &amp; videos supported • Multiple files at once</div>
+                  </div>
                   <div className="bulk-preview-grid">
                     {bulkFiles.length === 0 ? (
                       <div className="template-preview-item" style={{ color: 'var(--sub)', fontSize: 12 }}>Upload files to see previews.</div>
                     ) : (
                         bulkFiles.map((file, index) => (
                           <div key={file.id} className="bulk-preview-card template-preview-shell">
-                            <button type="button" className="template-preview-remove" aria-label={`Delete upload ${index + 1}`} onClick={() => removeBulkFile(file.id)}>
+                            <button type="button" className="template-preview-remove" aria-label={`Delete ${file.fileName}`} onClick={() => removeBulkFile(file.id)}>
                               <PreviewIcon kind="trash" size={14} stroke="currentColor" />
                             </button>
-                            <div className="bulk-preview-media">
-                              {String(file.contentType || '').startsWith('video/') ? <video src={file.preview} controls muted playsInline /> : <img src={file.preview} alt={file.fileName} />}
+                            <div className="bulk-preview-media" style={{ position: 'relative' }}>
+                              {String(file.contentType || '').startsWith('video/') ? (
+                                <>
+                                  <video src={file.preview} muted playsInline preload="metadata" style={{ width: '100%', display: 'block' }} />
+                                  <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: 'rgba(0,0,0,0.55)', borderRadius: '50%', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                                    <PreviewIcon kind="play" size={16} stroke="#fff" fill="#fff" />
+                                  </div>
+                                  <div style={{ position: 'absolute', top: 4, left: 4, background: 'rgba(0,0,0,0.65)', color: '#fff', fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 4 }}>VIDEO</div>
+                                </>
+                              ) : (
+                                <img src={file.preview} alt={file.fileName} />
+                              )}
                             </div>
-                          <div className="bulk-preview-meta">Upload {index + 1}</div>
-                        </div>
+                            <div className="bulk-preview-meta" style={{ padding: '5px 6px' }}>
+                              <div style={{ fontSize: 11, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.fileName}>
+                                {file.fileName}
+                              </div>
+                              <div style={{ fontSize: 10, color: 'var(--sub)', marginTop: 2 }}>
+                                {formatBytes(file.file?.size || 0)}
+                              </div>
+                            </div>
+                          </div>
                       ))
                     )}
                   </div>
