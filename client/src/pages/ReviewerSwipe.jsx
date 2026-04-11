@@ -10,6 +10,11 @@ function isVideoAsset(asset) {
   return source.startsWith('video/') || /\.(mp4|mov|avi|webm|mkv)$/i.test(source);
 }
 
+function formatTimestamp(value) {
+  const totalSeconds = Math.max(0, Math.floor(Number(value) || 0));
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`;
+}
+
 function SocialIcon({ type, className = '' }) {
   switch (type) {
     case 'heart':
@@ -80,6 +85,8 @@ export default function ReviewerSwipe() {
   const [videoTimestamp, setVideoTimestamp] = useState(0);
   const [showVideoComment, setShowVideoComment] = useState(false);
   const [videoCommentText, setVideoCommentText] = useState('');
+  const [activeAnnotationIndex, setActiveAnnotationIndex] = useState(null);
+  const [activeVideoTimestamp, setActiveVideoTimestamp] = useState(null);
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -119,32 +126,27 @@ export default function ReviewerSwipe() {
               }
 
               if (isVideoAsset(item)) {
-                const video = document.createElement('video');
-                const done = () => {
-                  video.onloadeddata = null;
-                  video.onerror = null;
-                  markLoaded();
-                  resolve();
-                };
-                video.preload = 'auto';
-                video.onloadeddata = done;
-                video.onerror = done;
-                video.src = mediaUrl;
+                markLoaded();
+                resolve();
                 return;
               }
 
               const image = new Image();
+              let handled = false;
+              const complete = () => {
+                if (handled) return;
+                handled = true;
+                markLoaded();
+                resolve();
+              };
+              
               image.decoding = 'async';
               image.loading = 'eager';
-              image.onload = () => {
-                markLoaded();
-                resolve();
-              };
-              image.onerror = () => {
-                markLoaded();
-                resolve();
-              };
+              image.onload = complete;
+              image.onerror = complete;
               image.src = mediaUrl;
+              
+              setTimeout(complete, 3000);
             })
         )
       );
@@ -188,6 +190,21 @@ export default function ReviewerSwipe() {
   }, [sessionId]);
 
   const currentImage = images[currentIndex];
+  const currentAnnotations = useMemo(
+    () => (currentImage ? annotations[currentImage.id] || [] : []),
+    [annotations, currentImage]
+  );
+  const currentVideoComments = useMemo(
+    () =>
+      currentAnnotations
+        .filter((item) => item.timestampSec != null)
+        .sort((left, right) => Number(left.timestampSec || 0) - Number(right.timestampSec || 0)),
+    [currentAnnotations]
+  );
+  const currentImageComments = useMemo(
+    () => currentAnnotations.filter((item) => item.timestampSec == null),
+    [currentAnnotations]
+  );
   const postOrderList = useMemo(() => {
     const orders = new Set();
     images.forEach((image) => {
@@ -199,6 +216,13 @@ export default function ReviewerSwipe() {
   const currentPostIndex = Math.max(0, postOrderList.findIndex((post) => post === currentPostOrder));
   const isComplete = currentIndex >= images.length && images.length > 0;
   const progress = images.length > 0 ? (currentIndex / images.length) * 100 : 0;
+
+  useEffect(() => {
+    setShowVideoComment(false);
+    setVideoCommentText('');
+    setActiveAnnotationIndex(null);
+    setActiveVideoTimestamp(null);
+  }, [currentImage?.id]);
 
   const upsertDecision = useCallback((imageId, liked) => {
     setDecisions((prev) => {
@@ -230,9 +254,17 @@ export default function ReviewerSwipe() {
   const handleAnnotation = useCallback(
     (pin) => {
       if (!currentImage) return;
+      const reviewerName = sessionStorage.getItem('reviewerName') || '';
       setAnnotations((prev) => ({
         ...prev,
-        [currentImage.id]: [...(prev[currentImage.id] || []), pin],
+        [currentImage.id]: [
+          ...(prev[currentImage.id] || []),
+          {
+            ...pin,
+            author: pin.author || reviewerName,
+            createdAt: pin.createdAt || new Date().toISOString(),
+          },
+        ],
       }));
     },
     [currentImage]
@@ -476,9 +508,11 @@ export default function ReviewerSwipe() {
             cardContent={renderTemplateCard(currentImage)}
             onDecision={handleDecision}
             onAnnotationAdd={handleAnnotation}
-            annotations={annotations[currentImage.id] || []}
+            annotations={currentAnnotations}
             pinMode={pinMode}
             gestureLocked={gestureLocked}
+            disabled={showVideoComment}
+            activeAnnotationIndex={activeAnnotationIndex}
             onPinModeTouchStart={() => setShowPinModeTip(false)}
             onPinModeUsed={() => setPinMode(false)}
           />
@@ -487,7 +521,6 @@ export default function ReviewerSwipe() {
 
       <div className="reviewer-comment-helper">
         {isVideoAsset(currentImage) ? (
-          // Video: timestamp comment button
           <button
             type="button"
             className="reviewer-comment-pill"
@@ -498,13 +531,13 @@ export default function ReviewerSwipe() {
               setVideoTimestamp(ts);
               setVideoCommentText('');
               setShowVideoComment(true);
+              setActiveVideoTimestamp(ts);
             }}
           >
             <span className="reviewer-comment-pill-icon"><SocialIcon type="comment" className="social-action-svg social-action-svg-sm" /></span>
-            Add comment at {(() => { const s = Math.floor(videoTimestamp); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; })()}
+            Add comment at {formatTimestamp(videoTimestamp)}
           </button>
         ) : (
-          // Image: spatial pin comment button
           <button
             type="button"
             className={`reviewer-comment-pill ${pinMode ? 'reviewer-comment-pill-active' : ''}`}
@@ -517,7 +550,7 @@ export default function ReviewerSwipe() {
       </div>
 
       {/* Video timestamp comment modal */}
-      {showVideoComment && (
+      {false && showVideoComment && (
         <div className="confirm-overlay" onClick={() => setShowVideoComment(false)}>
           <div className="confirm-dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
@@ -525,7 +558,7 @@ export default function ReviewerSwipe() {
                 padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700,
                 background: 'var(--accent)', color: '#fff',
               }}>
-                ⏱ {(() => { const s = Math.floor(videoTimestamp); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; })()}
+                ⏱ {(() => { const s = Math.floor(videoTimestamp); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; })()}
               </span>
               <span style={{ fontSize: 13, color: 'var(--sub)' }}>Timestamp comment</span>
             </div>
@@ -559,6 +592,89 @@ export default function ReviewerSwipe() {
         </div>
       )}
 
+      {isVideoAsset(currentImage) && currentVideoComments.length > 0 && (
+        <div className="reviewer-comment-thread">
+          <div className="reviewer-comment-thread-title">Comments</div>
+          <div className="timestamp-comment-list reviewer-timestamp-comment-list">
+            {currentVideoComments.map((item, index) => {
+              const isActive = activeVideoTimestamp != null && item.timestampSec === activeVideoTimestamp;
+              return (
+                <button
+                  key={`reviewer-video-comment-${index}`}
+                  type="button"
+                  className={`timestamp-comment-card timestamp-comment-button${isActive ? ' timestamp-comment-button-active' : ''}`}
+                  onClick={() => {
+                    videoRef.current?.seekTo?.(item.timestampSec);
+                    videoRef.current?.pause?.();
+                    setActiveVideoTimestamp(item.timestampSec);
+                  }}
+                >
+                  <span className="timestamp-comment-badge">{formatTimestamp(item.timestampSec)}</span>
+                  <span className="timestamp-comment-copy">{item.comment || 'No comment'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!isVideoAsset(currentImage) && currentImageComments.length > 0 && (
+        <div className="reviewer-comment-thread">
+          <div className="reviewer-comment-thread-title">Comments</div>
+          <div className="timestamp-comment-list reviewer-timestamp-comment-list">
+            {currentImageComments.map((item, index) => {
+              const isActive = activeAnnotationIndex === index;
+              return (
+                <button
+                  key={`reviewer-image-comment-${index}`}
+                  type="button"
+                  className={`timestamp-comment-card timestamp-comment-button${isActive ? ' timestamp-comment-button-active' : ''}`}
+                  onClick={() => setActiveAnnotationIndex(index)}
+                >
+                  <span className="timestamp-comment-badge">{index + 1}</span>
+                  <span className="timestamp-comment-copy">{item.comment || 'No comment'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {showVideoComment && (
+        <div className="reviewer-comment-composer">
+          <div className="reviewer-comment-composer-top">
+            <span className="timestamp-comment-badge reviewer-comment-timestamp">{formatTimestamp(videoTimestamp)}</span>
+            <span className="reviewer-comment-composer-label">Timestamp comment</span>
+          </div>
+          <textarea
+            id="video-comment-input"
+            autoFocus
+            className="field reviewer-comment-textarea"
+            rows={3}
+            placeholder="Add your comment here..."
+            value={videoCommentText}
+            onChange={e => setVideoCommentText(e.target.value)}
+          />
+          <div className="reviewer-comment-composer-actions">
+            <button type="button" className="btn-secondary" onClick={() => setShowVideoComment(false)}>Cancel</button>
+            <button
+              type="button"
+              className="btn-accent"
+              disabled={!videoCommentText.trim()}
+              onClick={() => {
+                if (!videoCommentText.trim()) return;
+                handleAnnotation({ timestampSec: videoTimestamp, comment: videoCommentText.trim() });
+                setActiveVideoTimestamp(videoTimestamp);
+                setVideoCommentText('');
+                setShowVideoComment(false);
+              }}
+            >
+              Post Comment
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="action-bar safe-pb reviewer-swipe-actions" style={{ padding: '8px 20px 20px' }}>
         <button
           type="button"
@@ -583,4 +699,5 @@ export default function ReviewerSwipe() {
     </div>
   );
 }
+
 

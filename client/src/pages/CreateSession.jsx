@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 const SOCIAL_CHANNELS = ['LinkedIn', 'Instagram', 'YouTube'];
 
@@ -131,7 +132,7 @@ function PreviewIcon({ kind, size = 20, stroke = 'currentColor', fill = 'none' }
 export default function CreateSession() {
   const navigate = useNavigate();
   const bulkInputRef = useRef(null);
-  const [uploadMode, setUploadMode] = useState('platform');
+  const [uploadMode, setUploadMode] = useState('bulk');
   const [selectedLayout, setSelectedLayout] = useState('LinkedIn');
   const [clientChoice, setClientChoice] = useState('other');
   const [projectChoice, setProjectChoice] = useState('other');
@@ -153,6 +154,8 @@ export default function CreateSession() {
   const [error, setError] = useState('');
   const [createdSession, setCreatedSession] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [usedStorage, setUsedStorage] = useState(0);
+  const { creator } = useAuth();
 
   useEffect(() => {
     let mounted = true;
@@ -161,8 +164,13 @@ export default function CreateSession() {
     }).catch(() => {
       if (mounted) setHistorySessions([]);
     });
+    
+    if (creator?.usedBytes !== undefined) {
+      setUsedStorage(Number(creator.usedBytes));
+    }
+    
     return () => { mounted = false; };
-  }, []);
+  }, [creator?.usedBytes]);
 
   const catalogSessions = useMemo(
     () =>
@@ -235,20 +243,21 @@ export default function CreateSession() {
     setExpectedReviewers((prev) => prev.some((item) => item.email === email) ? prev : [...prev, { email, name: name || email.split('@')[0] }]);
   };
 
-  const readFileAsBase64 = (file) => new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const full = typeof reader.result === 'string' ? reader.result : '';
-      resolve({
-        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-        fileName: file.name,
-        file,
-        data: full.split(',')[1] || '',
-        preview: full,
-        contentType: file.type || 'application/octet-stream',
-      });
-    };
-    reader.readAsDataURL(file);
+  const processLocalFile = (file) => new Promise((resolve) => {
+    const MAX_SIZE = 500 * 1024 * 1024; // 500MB limit
+    if (file.size > MAX_SIZE) {
+      setError(`File "${file.name}" exceeds the 500MB limit. Please compress large 4K/8K videos.`);
+      resolve(null);
+      return;
+    }
+    resolve({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      fileName: file.name,
+      file,
+      data: '',
+      preview: URL.createObjectURL(file), // Fix lag: Use object URL instead of full Base64
+      contentType: file.type || 'application/octet-stream',
+    });
   });
 
   const currentUploads = useMemo(() => {
@@ -274,7 +283,19 @@ export default function CreateSession() {
     }));
   }, [bulkFiles, platformRows, uploadMode]);
 
-  const totalUploadBytes = currentUploads.reduce((sum, item) => sum + Math.floor((String(item.data || '').length * 3) / 4), 0);
+  const totalUploadBytes = currentUploads.reduce((sum, item) => sum + (item.file?.size || 0), 0);
+  const MAX_ACCOUNT_LIMIT = 500 * 1024 * 1024;
+  const combinedStorageBytes = usedStorage + totalUploadBytes;
+  const isOverAccountLimit = combinedStorageBytes > MAX_ACCOUNT_LIMIT;
+
+  useEffect(() => {
+    if (isOverAccountLimit) {
+      setError(`Storage limit reached! You have used ${formatBytes(usedStorage)} and are trying to add ${formatBytes(totalUploadBytes)}. Account limit is 500.0 MB.`);
+    } else if (error && error.includes('Storage limit reached!')) {
+      setError('');
+    }
+  }, [totalUploadBytes, usedStorage, isOverAccountLimit, error]);
+
   const reviewUrl = createdSession ? api.getPublicReviewUrl(createdSession.id) : '';
 
   const renderPlatformPreview = (row) => {
@@ -386,7 +407,8 @@ export default function CreateSession() {
   const handlePlatformFileChange = async (rowIndex, fileList) => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
-    const converted = await Promise.all(files.map((file) => readFileAsBase64(file)));
+    const converted = (await Promise.all(files.map((file) => processLocalFile(file)))).filter(Boolean);
+    if (!converted.length) return;
     setPlatformRows((prev) => {
       const next = [...prev];
       const currentRow = next[rowIndex];
@@ -410,7 +432,8 @@ export default function CreateSession() {
       f.type.startsWith('image/') || f.type.startsWith('video/')
     );
     if (!allowed.length) return;
-    const converted = await Promise.all(allowed.map((file) => readFileAsBase64(file)));
+    const converted = (await Promise.all(allowed.map((file) => processLocalFile(file)))).filter(Boolean);
+    if (!converted.length) return;
     setBulkFiles((prev) => [...prev, ...converted]);
   };
 
@@ -580,7 +603,7 @@ export default function CreateSession() {
               <div>
                 <label className="field-label">Upload Mode *</label>
                 <div className="layout-switch" style={{ marginTop: 8, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
-                  {['platform', 'bulk'].map((mode) => (
+                  {['bulk', 'platform'].map((mode) => (
                     <button
                       key={mode}
                       type="button"
@@ -763,8 +786,13 @@ export default function CreateSession() {
               {uploadMode === 'bulk' ? (
                 <>
                   <div className="bulk-storage-box">
-                    <div className="bulk-storage-row"><span>This upload</span><strong>{formatBytes(totalUploadBytes)}</strong></div>
-                    <div className="bulk-storage-row"><span>Account limit</span><strong>500.0 MB</strong></div>
+                    <div className="bulk-storage-row"><span>Storage Used</span><strong>{formatBytes(usedStorage)}</strong></div>
+                    <div className="bulk-storage-row"><span>This Upload</span><strong style={{ color: isOverAccountLimit ? 'var(--fail)' : 'inherit' }}>{formatBytes(totalUploadBytes)}</strong></div>
+                    <div className="bulk-storage-row"><span>Account Limit</span><strong>500.0 MB</strong></div>
+                    <div className="storage-stack-bar-container">
+                      <div className="storage-stack-used" style={{ width: `${Math.min(100, (usedStorage / (500 * 1024 * 1024)) * 100)}%`, background: 'var(--sub)' }} />
+                      <div className="storage-stack-current" style={{ width: `${Math.min(100 - (usedStorage / (500 * 1024 * 1024)) * 100, (totalUploadBytes / (500 * 1024 * 1024)) * 100)}%`, background: isOverAccountLimit ? 'var(--fail)' : 'var(--accent)' }} />
+                    </div>
                   </div>
                   <div
                     className={`bulk-dropzone${isDragging ? ' bulk-dropzone-active' : ''}`}
@@ -864,7 +892,7 @@ export default function CreateSession() {
 
             {error && <div className="error-box">{error}</div>}
 
-            <button className="btn-accent" disabled={loading || currentUploads.length === 0} onClick={handleCreate}>
+            <button className="btn-accent" disabled={loading || currentUploads.length === 0 || isOverAccountLimit} onClick={handleCreate}>
               {loading ? 'Creating session...' : `Create Session with ${currentUploads.length} Upload${currentUploads.length !== 1 ? 's' : ''}`}
             </button>
           </div>

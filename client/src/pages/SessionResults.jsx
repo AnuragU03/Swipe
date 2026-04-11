@@ -114,7 +114,7 @@ function VideoCommentPanel({ image, comments }) {
         ref={playerRef}
         src={previewUrl}
         className="video-comment-player"
-        style={{ maxHeight: 'min(52vh, 420px)' }}
+        style={{ maxHeight: 'min(62vh, 520px)' }}
       />
       <div className="timestamp-comment-list">
         {comments.map((comment, commentIndex) => {
@@ -447,6 +447,7 @@ export default function SessionResults() {
                     const comments = subAnnotations.filter((item) => item.imageId === decision.imageId);
                     const likeCount = decision.liked ? 1 : 0;
                     const dislikeCount = decision.liked ? 0 : 1;
+                    const isVideo = isVideoAsset(image);
 
                     return (
                       <article key={`${submission.id || visibleIndex}-${decision.imageId}-${index}`} className="reviewer-card">
@@ -466,17 +467,15 @@ export default function SessionResults() {
                           <div className="history-comment-card">
                             <div className="history-card">
                               <div className="history-card-main">
-                                <div className="history-thumb">
-                                  {previewUrl ? (
-                                    isVideoAsset(image) ? (
-                                      <video src={previewUrl} muted playsInline preload="metadata" />
-                                    ) : (
+                                {!isVideo && (
+                                  <div className="history-thumb">
+                                    {previewUrl ? (
                                       <img src={previewUrl} alt={image?.fileName || 'Asset'} />
-                                    )
-                                  ) : (
-                                    <span className="history-thumb-fallback">No preview</span>
-                                  )}
-                                </div>
+                                    ) : (
+                                      <span className="history-thumb-fallback">No preview</span>
+                                    )}
+                                  </div>
+                                )}
 
                                 <div className="history-card-copy">
                                   <div className="history-card-title">
@@ -506,6 +505,12 @@ export default function SessionResults() {
                               </div>
                             </div>
 
+                            {comments.length > 0 && previewUrl && isVideo && (
+                              <div className="video-review-thread">
+                                <VideoCommentPanel image={image} comments={comments} />
+                              </div>
+                            )}
+
                             {comments.length > 0 && (
                               <div className="history-comment-list">
                                 {comments.map((comment, commentIndex) => (
@@ -528,14 +533,10 @@ export default function SessionResults() {
                               </div>
                             )}
 
-                            {comments.length > 0 && previewUrl && !isVideoAsset(image) && (
+                            {comments.length > 0 && previewUrl && !isVideo && (
                               <div className="annotation-panel">
                                 <AnnotationView annotations={comments} imageUrl={previewUrl} />
                               </div>
-                            )}
-
-                            {comments.length > 0 && previewUrl && isVideoAsset(image) && (
-                              <VideoCommentPanel image={image} comments={comments} />
                             )}
                           </div>
                         </div>

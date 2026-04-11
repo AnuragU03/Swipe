@@ -55,7 +55,7 @@ function HistoryVideoCommentPanel({ group }) {
         ref={playerRef}
         src={group.url}
         className="video-comment-player"
-        style={{ maxHeight: 'min(52vh, 420px)' }}
+        style={{ maxHeight: 'min(62vh, 520px)' }}
       />
       <div className="timestamp-comment-list">
         {group.comments.map((item, index) => {
@@ -261,7 +261,7 @@ export default function ReviewerSessionHistory() {
               <div key={group.imageId} className="history-comment-card">
                 <div className="history-card">
                   <div className="history-card-main">
-                    <HistoryThumb item={group} alt={group.fileName || group.imageId} />
+                    {!isVideoAsset(group) && <HistoryThumb item={group} alt={group.fileName || group.imageId} />}
                     <div className="history-card-copy">
                       <div className="history-card-title">{group.fileName || group.imageId}</div>
                       <div className="history-card-meta">
@@ -292,7 +292,11 @@ export default function ReviewerSessionHistory() {
                   ))}
                 </div>
 
-                {isVideoAsset(group) && group.url && <HistoryVideoCommentPanel group={group} />}
+                {isVideoAsset(group) && group.url && (
+                  <div className="video-review-thread">
+                    <HistoryVideoCommentPanel group={group} />
+                  </div>
+                )}
               </div>
             ))
           )}

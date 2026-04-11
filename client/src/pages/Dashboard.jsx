@@ -22,11 +22,14 @@ function formatRelativeTime(value) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function formatBytes(bytes) {
+  return `${((bytes || 0) / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function isVideoAsset(image) {
   const source = String(image?.contentType || image?.fileName || '').toLowerCase();
   return source.startsWith('video/') || /\.(mp4|mov|avi|webm|mkv)$/i.test(source);
 }
-
 function reviewerKey(reviewer) {
   return normalize(reviewer?.email, normalize(reviewer?.name, 'reviewer'));
 }
@@ -184,8 +187,11 @@ export default function Dashboard() {
               Logout
             </button>
           </div>
-          <div className="header-bar-dashboard-subtitle">
-            Welcome, {creator?.name || creator?.email || 'Creator'}
+          <div className="header-bar-dashboard-subtitle" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Welcome, {creator?.name || creator?.email || 'Creator'}</span>
+            <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: '0.02em', color: (Number(creator?.usedBytes || 0) > 500 * 1024 * 1024) ? 'var(--fail)' : 'var(--sub)' }}>
+              {formatBytes(creator?.usedBytes || 0)} / 500.0 MB
+            </span>
           </div>
         </div>
 

@@ -23,6 +23,7 @@ export default function SwipeCard({
   onPinModeTouchStart,
   navigationMode = false,
   gestureLocked = false,
+  activeAnnotationIndex = null,
 }) {
   const cardRef = useRef(null);
   const nameInputRef = useRef(null);
@@ -355,7 +356,7 @@ export default function SwipeCard({
         {annotations.map((pin, i) => (
           <div
             key={i}
-            className="pin-marker"
+            className={`pin-marker${activeAnnotationIndex === i ? ' pin-marker-active' : ''}`}
             style={{
               left: `${pin.x}%`,
               top: `${pin.y}%`,

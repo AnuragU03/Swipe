@@ -716,7 +716,7 @@ app.get('/api/auth/me', async (req, res) => {
     const creator = await db.getItem('creators', auth.creator.sub, auth.creator.sub);
     if (!creator) return res.status(404).json({ error: 'Creator not found' });
     const capabilities = await getCreatorCapabilities(creator);
-    res.json({ id: creator.id, email: creator.email, name: creator.name, ...capabilities });
+    const usedBytes = await getCreatorStorageUsageBytes(auth.creator.sub); res.json({ id: creator.id, email: creator.email, name: creator.name, usedBytes, ...capabilities });
   } catch (err) {
     console.error('Auth me error:', err);
     res.status(500).json({ error: 'Failed to get profile' });
@@ -1687,3 +1687,4 @@ app.listen(PORT, () => {
 ╚══════════════════════════════════════════╝
   `);
 });
+
